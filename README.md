@@ -1,6 +1,6 @@
-# Recall
+# Digest Me
 
-Recall is a browser-only flashcard studio for turning a CSV into randomized study decks.
+Digest Me is a browser-only flashcard studio for turning a CSV into randomized study decks.
 
 ## Run locally
 
@@ -17,7 +17,7 @@ The first row must contain exactly two columns: `Question,Answer`. The Quizlet-s
 aliases `Question (Front),Answer (Back)` are also accepted. Values may be quoted when
 they contain commas or line breaks.
 
-Recall validates every row in the browser. A file with a valid header can still import
+Digest Me validates every row in the browser. A file with a valid header can still import
 the usable rows while listing row-level issues for anything missing or malformed.
 
 Imported decks and study-session records are stored in IndexedDB on the current device.

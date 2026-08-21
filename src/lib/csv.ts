@@ -6,7 +6,7 @@ interface ParsedRow {
 }
 
 /**
- * Reads the small, intentionally strict CSV format used by Recall.
+ * Reads the small, intentionally strict CSV format used by Digest Me.
  * Quoted commas, escaped quotes, and quoted line breaks are supported without
  * sending the uploaded file anywhere outside the browser.
  */

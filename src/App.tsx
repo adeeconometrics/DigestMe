@@ -372,7 +372,7 @@ export default function App() {
         <header className="topbar">
           <div className="mobile-brand">
             <span className="brand-mark"><Icon name="spark" size={17} /></span>
-            <span>recall</span>
+            <span>Digest Me</span>
           </div>
           <button
             aria-expanded={mobileMenuOpen}
@@ -491,8 +491,7 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
     <aside className="sidebar">
       <div className="brand-lockup">
         <span className="brand-mark"><Icon name="spark" size={18} /></span>
-        <span className="brand-word">recall</span>
-        <span className="brand-label">studio</span>
+        <span className="brand-word">Digest Me</span>
       </div>
 
       <div className="sidebar-label">workspace</div>
@@ -533,14 +532,9 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
       </button>
 
       <div className="sidebar-bottom">
-        <div className="privacy-note">
-          <span className="privacy-icon"><Icon name="cards" size={16} /></span>
-          <span><strong>Local by default</strong><small>Stored in IndexedDB.</small></span>
-        </div>
         <div className="profile-row">
           <span className="avatar small">DS</span>
           <span className="profile-copy"><strong>My study space</strong><small>Personal workspace</small></span>
-          <Icon className="profile-chevron" name="chevron-down" size={15} />
         </div>
       </div>
     </aside>

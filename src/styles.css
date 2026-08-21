@@ -106,16 +106,6 @@ input:focus-visible,
   letter-spacing: -0.06em;
 }
 
-.brand-label {
-  margin: 5px 0 0 1px;
-  color: var(--ink-faint);
-  font-family: var(--mono);
-  font-size: 8px;
-  font-weight: 500;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-}
-
 .sidebar-label {
   margin: 43px 10px 11px;
   color: var(--ink-faint);
@@ -348,8 +338,7 @@ input:focus-visible,
   transform: translateY(-2px);
 }
 
-.import-prompt-icon,
-.privacy-icon {
+.import-prompt-icon {
   display: inline-flex;
   width: 29px;
   height: 29px;
@@ -370,30 +359,6 @@ input:focus-visible,
   display: grid;
   gap: 18px;
   margin-top: auto;
-}
-
-.privacy-note {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 8px;
-  border-top: 1px solid var(--line);
-}
-
-.privacy-note strong {
-  color: var(--ink);
-  font-size: 10px;
-}
-
-.privacy-note small {
-  font-size: 9px;
-}
-
-.privacy-icon {
-  width: 27px;
-  height: 27px;
-  border: 1px solid var(--line);
-  background: transparent;
 }
 
 .profile-row {
@@ -434,11 +399,6 @@ input:focus-visible,
 
 .profile-copy small {
   font-size: 9px;
-}
-
-.profile-chevron {
-  margin-left: auto;
-  color: var(--ink-faint);
 }
 
 .main-content {

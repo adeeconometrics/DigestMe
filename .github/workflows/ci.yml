@@ -1,4 +1,4 @@
-name: Build and deploy Recall
+name: Build and deploy Digest Me
 
 on:
   push:
