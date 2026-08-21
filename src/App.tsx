@@ -668,15 +668,17 @@ function StudyDesk({
                     role="button"
                     tabIndex={0}
                   >
-                    <div aria-hidden={isFlipped} className="flashcard-face card-front">
-                      <div className="card-face-top"><span className="face-label">question</span><span className="face-symbol">01</span></div>
-                      <div className="question-content"><span className="question-mark">?</span><p>{currentCard.question}</p></div>
-                      <div className="card-face-bottom"><span>Click to reveal</span><span className="key-hint">space</span></div>
-                    </div>
-                    <div aria-hidden={!isFlipped} className="flashcard-face card-back">
-                      <div className="card-face-top"><span className="face-label answer-label">answer</span><span className="answer-spark"><Icon name="spark" size={18} /></span></div>
-                      <div className="answer-content"><p>{currentCard.answer}</p></div>
-                      <div className="card-face-bottom"><span>How did that feel?</span><span className="face-symbol">02</span></div>
+                    <div className="flashcard-inner">
+                      <div aria-hidden={isFlipped} className="flashcard-face card-front">
+                        <div className="card-face-top"><span className="face-label">question</span><span className="face-symbol">01</span></div>
+                        <div className="question-content"><span className="question-mark">?</span><p>{currentCard.question}</p></div>
+                        <div className="card-face-bottom"><span>Click to reveal</span><span className="key-hint">space</span></div>
+                      </div>
+                      <div aria-hidden={!isFlipped} className="flashcard-face card-back">
+                        <div className="card-face-top"><span className="face-label answer-label">answer</span><span className="answer-spark"><Icon name="spark" size={18} /></span></div>
+                        <div className="answer-content"><p>{currentCard.answer}</p></div>
+                        <div className="card-face-bottom"><span>How did that feel?</span><span className="face-symbol">02</span></div>
+                      </div>
                     </div>
                   </div>
                 </div>

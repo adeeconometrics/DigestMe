@@ -810,13 +810,18 @@ input:focus-visible,
   z-index: 1;
   width: min(100%, 660px);
   height: 377px;
-  transform-style: preserve-3d;
-  transition: transform 640ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  perspective: 1200px;
   cursor: pointer;
-  animation: card-arrive 550ms 70ms both;
 }
 
-.flashcard.is-flipped {
+.flashcard-inner {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transition: transform 640ms cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+.flashcard.is-flipped .flashcard-inner {
   transform: rotateY(180deg);
 }
 
@@ -828,30 +833,20 @@ input:focus-visible,
   padding: 25px 28px 23px;
   border: 1px solid rgba(29, 52, 50, 0.1);
   border-radius: 20px;
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
   box-shadow: 0 19px 30px rgba(29, 52, 50, 0.11), 0 3px 5px rgba(29, 52, 50, 0.06);
 }
 
 .card-front {
-  z-index: 2;
   color: var(--ink);
   background: var(--paper-bright);
 }
 
 .card-back {
-  z-index: 1;
   color: var(--ink);
   background: var(--lime);
   transform: rotateY(180deg);
-}
-
-/* Keep the inactive face out of the paint tree so long answers never bleed through the flip. */
-.flashcard:not(.is-flipped) .card-back {
-  visibility: hidden;
-}
-
-.flashcard.is-flipped .card-front {
-  visibility: hidden;
 }
 
 .card-face-top,
