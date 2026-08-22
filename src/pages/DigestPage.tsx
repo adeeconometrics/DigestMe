@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
-import { getDocument, getDocumentSummaries, putDocument, removeDocument } from "../lib/db";
+import { getDocumentSummaries, getDocumentWithSource, putDocumentWithFile, removeDocument } from "../lib/db";
+import type { StoredDocumentFile } from "../lib/db";
 import { isPdfFile, parsePdf } from "../parser";
 import type { ParsedDocument } from "../parser";
 import type { DocumentSummary } from "../types";
@@ -25,6 +26,7 @@ function formatDate(value: string): string {
 export default function DigestPage() {
   const [summaries, setSummaries] = useState<DocumentSummary[]>([]);
   const [selected, setSelected] = useState<ParsedDocument | null>(null);
+  const [selectedFile, setSelectedFile] = useState<StoredDocumentFile | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
   const [message, setMessage] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -52,8 +54,9 @@ export default function DigestPage() {
 
     try {
       const parsed = await parsePdf(file);
-      await putDocument(parsed);
+      await putDocumentWithFile(parsed, file);
       setSelected(parsed);
+      setSelectedFile({ id: parsed.id, fileName: file.name, mimeType: file.type || "application/pdf", blob: file });
       setStatus("idle");
       setMessage(`${parsed.fileName} parsed into its context tree.`);
       await refreshSummaries();
@@ -79,9 +82,10 @@ export default function DigestPage() {
   async function handleSelect(summaryId: string): Promise<void> {
     if (selected?.id === summaryId) return;
     try {
-      const document = await getDocument(summaryId);
-      if (document) {
-        setSelected(document);
+      const source = await getDocumentWithSource(summaryId);
+      if (source) {
+        setSelected(source.document);
+        setSelectedFile(source.file);
         setStatus("idle");
         setMessage("");
       }
@@ -94,7 +98,10 @@ export default function DigestPage() {
   async function handleRemove(summaryId: string): Promise<void> {
     try {
       await removeDocument(summaryId);
-      if (selected?.id === summaryId) setSelected(null);
+      if (selected?.id === summaryId) {
+        setSelected(null);
+        setSelectedFile(null);
+      }
       await refreshSummaries();
     } catch {
       setStatus("error");
