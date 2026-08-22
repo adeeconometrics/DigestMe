@@ -1,10 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, RefObject } from "react";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
 import { getDecksWithStarter, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
 import type { AppView, CsvValidationResult, Deck, Flashcard, Rating, StudySession } from "./types";
+
+const DigestPage = lazy(() => import("./pages/DigestPage"));
+
+const VIEW_ROUTES: Record<AppView, string> = {
+  study: "#/study",
+  library: "#/library",
+  digest: "#/digest",
+};
+
+function viewFromHash(hash: string): AppView {
+  if (hash === "#/library") return "library";
+  if (hash === "#/digest") return "digest";
+  return "study";
+}
 
 interface ImportState {
   fileName: string;
@@ -65,7 +79,7 @@ export default function App() {
   const [sessionHistory, setSessionHistory] = useState<StudySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [sessionStartedAt, setSessionStartedAt] = useState("");
-  const [view, setView] = useState<AppView>("study");
+  const [view, setView] = useState<AppView>(() => viewFromHash(window.location.hash));
   const [randomize, setRandomize] = useState(true);
   const [studyOrder, setStudyOrder] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -138,6 +152,19 @@ export default function App() {
     const timeout = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  // Keep the URL hash mapped to the active view so views are linkable
+  // while the app stays fully static.
+  useEffect(() => {
+    const route = VIEW_ROUTES[view];
+    if (window.location.hash !== route) window.history.replaceState(null, "", route);
+  }, [view]);
+
+  useEffect(() => {
+    const handleHashChange = (): void => setView(viewFromHash(window.location.hash));
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   function openImporter() {
     setImportState(null);
@@ -386,7 +413,7 @@ export default function App() {
           <div className="breadcrumbs">
             <span>workspace</span>
             <Icon name="chevron-right" size={13} />
-            <span>{view === "study" ? "study desk" : "deck library"}</span>
+            <span>{view === "study" ? "study desk" : view === "digest" ? "case digest" : "deck library"}</span>
           </div>
           <div className="topbar-actions">
             <div className={`local-badge ${storageError ? "has-error" : ""}`} title={storageError || "Your collection is stored in IndexedDB on this device."}><span className="status-dot" /> {storageError ? "memory fallback" : "IndexedDB storage"}</div>
@@ -432,6 +459,10 @@ export default function App() {
             setRandomize={setRandomize}
             totalDeckCards={studyOrder.length}
           />
+        ) : view === "digest" ? (
+          <Suspense fallback={<div className="loading-workspace"><span className="loading-orbit"><Icon name="spark" size={20} /></span><strong>Loading the digest bench...</strong><small>Preparing the local PDF parser</small></div>}>
+            <DigestPage />
+          </Suspense>
         ) : (
           <LibraryView
             activeDeckId={activeDeckId}
@@ -501,6 +532,10 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
           <span>Study desk</span>
           {activeDeckId && <span className="nav-indicator" />}
         </button>
+        <button className={`nav-item ${view === "digest" ? "active" : ""}`} onClick={() => onSetView("digest")} type="button">
+          <Icon name="tree" size={18} />
+          <span>Case digest</span>
+        </button>
         <button className={`nav-item ${view === "library" ? "active" : ""}`} onClick={() => onSetView("library")} type="button">
           <Icon name="grid" size={18} />
           <span>Deck library</span>
@@ -555,6 +590,7 @@ function MobileMenu({ activeDeckId, decks, onImport, onSelectDeck, onSetView, vi
     <div className="mobile-menu-panel">
       <div className="mobile-nav-links">
         <button className={`nav-item ${view === "study" ? "active" : ""}`} onClick={() => onSetView("study")} type="button"><Icon name="book" size={17} /> Study desk</button>
+        <button className={`nav-item ${view === "digest" ? "active" : ""}`} onClick={() => onSetView("digest")} type="button"><Icon name="tree" size={17} /> Case digest</button>
         <button className={`nav-item ${view === "library" ? "active" : ""}`} onClick={() => onSetView("library")} type="button"><Icon name="grid" size={17} /> Deck library <span className="nav-count">{decks.length}</span></button>
       </div>
       <div className="mobile-deck-heading">your decks</div>
