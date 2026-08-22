@@ -2,7 +2,14 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Sigma from "sigma";
 import type { DocumentNode } from "../parser";
-import { treeToGraph, type TreeNodePayload } from "../graph/treeGraph";
+import {
+  EDGE_BASE,
+  EDGE_DIMMED,
+  EDGE_TRACE,
+  pathToNode,
+  treeToGraph,
+  type TreeNodePayload,
+} from "../graph/treeGraph";
 
 interface HoveredNode {
   id: string;
@@ -21,16 +28,18 @@ interface DigestGraphProps {
   onSelectNode?: (node: SelectedNode) => void;
   /** External request to pan the camera to a node (chat references). */
   focusRequest?: { nodeId: string; nonce: number } | null;
+  /** The node whose context trace should be lit up (retrieval visualization). */
+  selectedNodeId?: string | null;
 }
 
-/** Low-energy force settings so idle graphs drift organically instead of jittering. */
+/** Gentle force settings so interactions settle slowly, Obsidian-style. */
 function physicsSettings(graph: Parameters<typeof forceAtlas2.inferSettings>[0]) {
   const inferred = forceAtlas2.inferSettings(graph);
   return {
     ...inferred,
     scalingRatio: Math.max(inferred.scalingRatio ?? 8, 10),
-    gravity: 1,
-    slowDown: 24,
+    gravity: 1.2,
+    slowDown: 42,
   };
 }
 
@@ -38,11 +47,13 @@ function physicsSettings(graph: Parameters<typeof forceAtlas2.inferSettings>[0])
  * Sigma.js visualization of a parsed document's context tree.
  *
  * - Hovering reveals the node reference `(section, p#)`.
- * - Nodes are draggable; a low-energy ForceAtlas2 simulation keeps the
- *   layout fluid and settles back down once interactions stop.
+ * - Edges stay thin and opaque; selecting a node lights up the
+ *   root-to-node context trace in signal red while the rest recede.
+ * - Nodes are draggable; physics only stirs briefly after interactions,
+ *   settling slowly instead of idling.
  * - Clicking (press + release without drag) reports the node upward.
  */
-export default function DigestGraph({ tree, className, onSelectNode, focusRequest }: DigestGraphProps) {
+export default function DigestGraph({ tree, className, onSelectNode, focusRequest, selectedNodeId }: DigestGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma<TreeNodePayload> | null>(null);
   const [hovered, setHovered] = useState<HoveredNode | null>(null);
@@ -75,10 +86,9 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
     sigmaRef.current = renderer;
     container.classList.add("is-grabbable");
 
-    // --- fluid motion: heat-driven force simulation -----------------------
+    // --- calm motion: heat-driven force simulation, no idle drift -----------
     const settings = physicsSettings(graph);
-    let hot = 0; // frames of energetic simulation left
-    let frame = 0;
+    let hot = 0; // frames of gentle simulation left after an interaction
     let rafId = 0;
     let draggedNodeId: string | null = null;
 
@@ -87,14 +97,11 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
     };
 
     const tick = (): void => {
-      frame += 1;
       const isDragging = draggedNodeId !== null;
-      // Ambient drift every 3rd frame keeps the graph gently alive;
-      // drags and fresh interactions push short energetic bursts.
-      if (isDragging || hot > 0 || frame % 3 === 0) {
+      if (isDragging || hot > 0) {
         forceAtlas2.assign(graph, { iterations: 1, settings });
         if (hot > 0 && !isDragging) hot -= 1;
-        if (draggedNodeId === null) renderer.refresh();
+        renderer.refresh();
       }
       rafId = window.requestAnimationFrame(tick);
     };
@@ -114,7 +121,7 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       const position = renderer.viewportToGraph({ x: event.clientX - rect.left, y: event.clientY - rect.top });
       graph.setNodeAttribute(draggedNodeId, "x", position.x);
       graph.setNodeAttribute(draggedNodeId, "y", position.y);
-      reheat(90);
+      reheat(36);
     };
 
     const handleUp = (): void => {
@@ -134,14 +141,14 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
 
     const handleEnter = ({ node }: { node: string }): void => {
       showTooltip(node);
-      reheat(30);
+      reheat(14);
     };
     const handleLeave = (): void => setHovered(null);
 
     const handleClick = ({ node }: { node: string }): void => {
       const attributes = graph.getNodeAttributes(node);
       onSelectNode?.({ id: node, ...attributes });
-      reheat(45);
+      reheat(20);
     };
 
     renderer.on("downNode", handleDown);
@@ -164,6 +171,25 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       container.innerHTML = "";
     };
   }, [graph, onSelectNode]);
+
+  // Context trace: when a node is selected (graph click or chat reference),
+  // the edges along its path from the document root activate while the
+  // remaining edges recede — signaling where the retrieval came from.
+  useEffect(() => {
+    const tracePath = selectedNodeId ? pathToNode(tree, selectedNodeId) : null;
+    const onTrace = new Set(tracePath ?? []);
+
+    graph.forEachEdge((edge, _attributes, source, target) => {
+      const active = Boolean(tracePath && onTrace.has(source) && onTrace.has(target));
+      graph.setEdgeAttribute(edge, "color", active ? EDGE_TRACE.color : tracePath ? EDGE_DIMMED.color : EDGE_BASE.color);
+      graph.setEdgeAttribute(edge, "size", active ? EDGE_TRACE.size : EDGE_BASE.size);
+      graph.setEdgeAttribute(edge, "zIndex", active ? 1 : 0);
+    });
+
+    graph.forEachNode((node) => {
+      graph.setNodeAttribute(node, "highlighted", onTrace.has(node));
+    });
+  }, [graph, tree, selectedNodeId]);
 
   function focusNode(nodeId: string): void {
     const renderer = sigmaRef.current;

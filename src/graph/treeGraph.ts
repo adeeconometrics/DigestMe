@@ -15,6 +15,23 @@ export const NODE_COLORS: Record<DocumentNode["kind"], string> = {
   block: "#bfe5eb",
 };
 
+/** Base edge styling: thin and fully opaque so hierarchy stays legible. */
+export const EDGE_BASE = {
+  color: "#1d3432",
+  size: 0.75,
+} as const;
+
+/** Activated trace edges: the root→node context path lights up in signal red. */
+export const EDGE_TRACE = {
+  color: "#e03131",
+  size: 2.6,
+} as const;
+
+/** Dimmed state for edges outside an active trace. */
+export const EDGE_DIMMED = {
+  color: "rgba(29, 52, 50, 0.18)",
+} as const;
+
 const NODE_SIZES: Record<DocumentNode["kind"], number> = {
   document: 14,
   section: 8,
@@ -52,8 +69,7 @@ export function treeToGraph(root: DocumentNode): Graph<TreeNodePayload> {
     }
 
     if (parentId && !graph.hasEdge(parentId, node.id)) {
-      // Darkest palette ink keeps parent-child references clearly readable.
-      graph.addEdge(parentId, node.id, { color: "#1d3432", size: 1.6 });
+      graph.addEdge(parentId, node.id, { color: EDGE_BASE.color, size: EDGE_BASE.size });
     }
 
     node.children.forEach((child) => visit(child, depth + 1, node.id));
@@ -61,4 +77,32 @@ export function treeToGraph(root: DocumentNode): Graph<TreeNodePayload> {
 
   visit(root, 0, null);
   return graph;
+}
+
+/**
+ * Ids from the document root down to the target node (inclusive), or null
+ * when the id does not belong to this tree. Used to light up the context
+ * trace when retrieval results are visualized.
+ */
+export function pathToNode(root: DocumentNode, nodeId: string): string[] | null {
+  const parents = new Map<string, string | null>();
+  let found: DocumentNode | null = null;
+
+  const visit = (node: DocumentNode, parentId: string | null): void => {
+    parents.set(node.id, parentId);
+    if (node.id === nodeId) found = node;
+    if (found) return;
+    node.children.forEach((child) => visit(child, node.id));
+  };
+
+  visit(root, null);
+  if (!found) return null;
+
+  const path: string[] = [];
+  let cursor: string | null = nodeId;
+  while (cursor !== null) {
+    path.unshift(cursor);
+    cursor = parents.get(cursor) ?? null;
+  }
+  return path;
 }

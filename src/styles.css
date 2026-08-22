@@ -3095,9 +3095,7 @@ input:focus-visible,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 20px;
-  background:
-    radial-gradient(circle at 18% 12%, rgba(218, 250, 113, 0.16), transparent 20rem),
-    var(--paper-bright);
+  background: var(--paper-bright);
 }
 
 .slice-graph .digest-graph {
@@ -3115,9 +3113,7 @@ input:focus-visible,
   gap: 6px;
   border: 1.5px dashed rgba(29, 52, 50, 0.24);
   border-radius: 24px;
-  background:
-    radial-gradient(circle at 80% 10%, rgba(218, 250, 113, 0.14), transparent 22rem),
-    var(--paper-bright);
+  background: var(--paper-bright);
   text-align: center;
   padding: 40px;
 }
@@ -3318,9 +3314,7 @@ input:focus-visible,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 22px;
-  background:
-    radial-gradient(circle at 18% 12%, rgba(218, 250, 113, 0.16), transparent 20rem),
-    var(--paper-bright);
+  background: var(--paper-bright);
 }
 
 .digest-graph-canvas {

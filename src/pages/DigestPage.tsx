@@ -291,6 +291,7 @@ export default function DigestPage() {
             <DigestGraph
               focusRequest={focusRequest}
               onSelectNode={handleGraphNodeSelect}
+              selectedNodeId={selectedNodeId}
               tree={selected.root}
             />
           </div>
