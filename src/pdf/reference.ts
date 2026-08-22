@@ -25,7 +25,12 @@ export interface PageTextIndex {
 
 /** Lowercases and collapses all whitespace so markdown/PDF spacing mismatches vanish. */
 function normalize(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
+  return value
+    .replace(/[\u2018\u2019\u201c\u201d]/g, "'")
+    .replace(/[\u2013\u2014]/g, "-")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -54,8 +59,10 @@ export async function indexPageText(page: PDFPageProxy): Promise<PageTextIndex> 
 
     const piece = normalize(item.str);
     if (!piece) continue;
-    items.push({ str: piece, start: normalized.length, end: normalized.length + piece.length, box });
-    normalized = `${normalized}${normalized ? " " : ""}${piece}`;
+    // Account for the joining separator so ranges stay aligned with `text`.
+    const joiner = normalized ? 1 : 0;
+    items.push({ str: piece, start: normalized.length + joiner, end: normalized.length + joiner + piece.length, box });
+    normalized = `${normalized}${joiner ? " " : ""}${piece}`;
   }
 
   return { pageNumber: page.pageNumber, text: normalized, items };
@@ -85,12 +92,14 @@ function unionBox(items: IndexedTextItem[], start: number, end: number): Referen
  * truncated labels still land on their source region.
  */
 export function locateReference(index: PageTextIndex, node: DocumentNode): { pageNumber: number; box: ReferenceBox } | null {
-  const raw = (node.text ?? node.label ?? "").trim();
+  // Labels may be display-truncated ("…") or carry table-cell separators ("·")
+  // that only exist in the markdown representation, never in the source text.
+  const raw = (node.text ?? node.label ?? "").replace(/[…·]/g, " ").trim();
   if (!raw) return null;
 
   const query = normalize(raw);
   for (const length of [Math.min(query.length, 140), 60, 32]) {
-    const candidate = query.slice(0, length);
+    const candidate = query.slice(0, length).trim();
     if (candidate.length < 8) break;
     const at = index.text.indexOf(candidate);
     if (at >= 0) {
@@ -99,12 +108,13 @@ export function locateReference(index: PageTextIndex, node: DocumentNode): { pag
     }
   }
 
-  // Last resort: match a rare-word subset of the snippet.
+  // Last resort: match a distinctive-word subset of the snippet.
   const words = query.split(" ").filter((word) => word.length > 4).slice(0, 6);
   if (words.length >= 2) {
-    const at = index.text.indexOf(words.join(" "));
+    const phrase = words.join(" ");
+    const at = index.text.indexOf(phrase);
     if (at >= 0) {
-      const box = unionBox(index.items, at, at + words.join(" ").length);
+      const box = unionBox(index.items, at, at + phrase.length);
       if (box) return { pageNumber: index.pageNumber, box };
     }
   }
