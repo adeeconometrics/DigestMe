@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
 import { getDocumentSummaries, getDocumentWithSource, putDocumentWithFile, removeDocument } from "../lib/db";
 import type { StoredDocumentFile } from "../lib/db";
-import { isPdfFile, parsePdf } from "../parser";
-import type { ParsedDocument } from "../parser";
+import { flattenTree, isPdfFile, parsePdf } from "../parser";
+import type { DocumentNode, ParsedDocument } from "../parser";
 import type { DocumentSummary } from "../types";
+
+const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 
 type DigestStatus = "idle" | "parsing" | "error";
 
@@ -27,10 +29,16 @@ export default function DigestPage() {
   const [summaries, setSummaries] = useState<DocumentSummary[]>([]);
   const [selected, setSelected] = useState<ParsedDocument | null>(null);
   const [selectedFile, setSelectedFile] = useState<StoredDocumentFile | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
   const [message, setMessage] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedNode: DocumentNode | null = useMemo(() => {
+    if (!selected || !selectedNodeId) return null;
+    return flattenTree(selected.root).find((node) => node.id === selectedNodeId) ?? null;
+  }, [selected, selectedNodeId]);
 
   const refreshSummaries = useCallback(() => {
     return getDocumentSummaries()
@@ -86,6 +94,7 @@ export default function DigestPage() {
       if (source) {
         setSelected(source.document);
         setSelectedFile(source.file);
+        setSelectedNodeId(null);
         setStatus("idle");
         setMessage("");
       }
@@ -101,6 +110,7 @@ export default function DigestPage() {
       if (selected?.id === summaryId) {
         setSelected(null);
         setSelectedFile(null);
+        setSelectedNodeId(null);
       }
       await refreshSummaries();
     } catch {
@@ -148,7 +158,7 @@ export default function DigestPage() {
 
       {message && <div className={`digest-status ${status === "error" ? "is-error" : ""}`} role="status">{message}</div>}
 
-      <div className="digest-layout">
+      <div className={`digest-layout ${selectedFile ? "with-viewer" : ""}`}>
         <aside className="digest-docs">
           <div className="panel-heading"><span>parsed documents</span><Icon name="layers" size={16} /></div>
           {summaries.length ? summaries.map((summary) => (
@@ -180,9 +190,12 @@ export default function DigestPage() {
                     <span className="metric-chip">pdf-inspector v{selected.parserVersion}</span>
                   </div>
                 </div>
-                <span className="graph-hint">hover a node to see (section, p#)</span>
+                <span className="graph-hint">hover for (section, p#) · click to open the source</span>
               </div>
-              <DigestGraph tree={selected.root} />
+              <DigestGraph
+                tree={selected.root}
+                onSelectNode={(node) => setSelectedNodeId(node.id)}
+              />
             </>
           ) : (
             <div className="graph-empty">
@@ -192,6 +205,16 @@ export default function DigestPage() {
             </div>
           )}
         </section>
+
+        {selected && selectedFile && (
+          <Suspense fallback={<aside className="pdf-viewer"><div className="pdf-viewer-loading">Preparing the source document...</div></aside>}>
+            <PdfReferenceViewer
+              file={selectedFile.blob}
+              fileName={selectedFile.fileName}
+              referenceNode={selectedNode}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );
