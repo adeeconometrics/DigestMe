@@ -447,7 +447,7 @@ export default function App() {
       />
 
       <main className="main-content">
-        <header className="topbar">
+        <header className="mobile-topbar">
           <div className="mobile-brand">
             <span className="brand-mark"><Icon name="spark" size={17} /></span>
             <span>Digest Me</span>
@@ -461,19 +461,6 @@ export default function App() {
           >
             <Icon name="menu" size={20} />
           </button>
-          <div className="breadcrumbs">
-            <span>workspace</span>
-            <Icon name="chevron-right" size={13} />
-            <span>{view === "study" ? "study desk" : view === "digest" ? "case digest" : "deck library"}</span>
-          </div>
-          <div className="topbar-actions">
-            <div className={`local-badge ${storageError ? "has-error" : ""}`} title={storageError || "Your collection is stored in IndexedDB on this device."}><span className="status-dot" /> {storageError ? "memory fallback" : "IndexedDB storage"}</div>
-            <button aria-label="Import CSV" className="primary-button compact" onClick={openImporter} type="button">
-              <Icon name="upload" size={16} />
-              <span>Import CSV</span>
-            </button>
-            <div aria-label="Your study space" className="avatar">DS</div>
-          </div>
           {mobileMenuOpen && (
             <MobileMenu
               activeDeckId={activeDeckId}
