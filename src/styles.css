@@ -3091,6 +3091,14 @@ input:focus-visible,
   outline: none;
 }
 
+.digest-graph-canvas.is-grabbable canvas {
+  cursor: grab;
+}
+
+.digest-graph-canvas.is-dragging canvas {
+  cursor: grabbing;
+}
+
 .digest-graph-legend {
   position: absolute;
   z-index: 2;

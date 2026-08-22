@@ -52,7 +52,8 @@ export function treeToGraph(root: DocumentNode): Graph<TreeNodePayload> {
     }
 
     if (parentId && !graph.hasEdge(parentId, node.id)) {
-      graph.addEdge(parentId, node.id, { color: "rgba(29, 52, 50, 0.18)", size: 1 });
+      // Darkest palette ink keeps parent-child references clearly readable.
+      graph.addEdge(parentId, node.id, { color: "#1d3432", size: 1.6 });
     }
 
     node.children.forEach((child) => visit(child, depth + 1, node.id));
