@@ -2,13 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
-import { getDocumentSummaries, getDocumentWithSource, putDocumentWithFile, removeDocument } from "../lib/db";
+import { getDocumentWithSource, putDocumentWithFile } from "../lib/db";
 import type { StoredDocumentFile } from "../lib/db";
 import { flattenTree, isPdfFile, parsePdf } from "../parser";
 import type { DocumentNode, ParsedDocument } from "../parser";
 import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
-import type { DocumentSummary } from "../types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 
@@ -45,9 +44,15 @@ function welcomeMessage(): ChatMessage {
   return { id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "welcome" };
 }
 
+interface DigestPageProps {
+  /** Incremented by the sidebar "New session" action; resets the thread. */
+  sessionToken?: number;
+  /** Sidebar request to open a previously digested document. */
+  focusDoc?: { id: string; nonce: number } | null;
+}
+
 /** Case digest: a chat session over a locally parsed PDF. */
-export default function DigestPage() {
-  const [summaries, setSummaries] = useState<DocumentSummary[]>([]);
+export default function DigestPage({ sessionToken = 0, focusDoc = null }: DigestPageProps) {
   const [selected, setSelected] = useState<ParsedDocument | null>(null);
   const [selectedFile, setSelectedFile] = useState<StoredDocumentFile | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -74,19 +79,29 @@ export default function DigestPage() {
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
+  // Sidebar "New session": clear the thread and selection.
+  const firstSessionToken = useRef(sessionToken);
+  useEffect(() => {
+    if (sessionToken === firstSessionToken.current) return;
+    setSelected(null);
+    setSelectedFile(null);
+    setSelectedNodeId(null);
+    setStatus("idle");
+    setMessages([welcomeMessage()]);
+  }, [sessionToken]);
+
+  // Sidebar session list: open a stored document on demand.
+  const lastFocusNonce = useRef(0);
+  useEffect(() => {
+    if (!focusDoc || focusDoc.nonce === lastFocusNonce.current) return;
+    lastFocusNonce.current = focusDoc.nonce;
+    void handleSelect(focusDoc.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusDoc]);
+
   const pushError = useCallback((text: string): void => {
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "error", text });
   }, [pushMessage]);
-
-  const refreshSummaries = useCallback(() => {
-    return getDocumentSummaries()
-      .then(setSummaries)
-      .catch(() => pushError("IndexedDB is unavailable, so parsed documents will not be saved."));
-  }, [pushError]);
-
-  useEffect(() => {
-    void refreshSummaries();
-  }, [refreshSummaries]);
 
   function openSession(parsed: ParsedDocument, file: StoredDocumentFile): void {
     setSelected(parsed);
@@ -119,7 +134,6 @@ export default function DigestPage() {
       const stored: StoredDocumentFile = { id: parsed.id, fileName: file.name, mimeType: file.type || "application/pdf", blob: file };
       await putDocumentWithFile(parsed, file);
       openSession(parsed, stored);
-      await refreshSummaries();
     } catch (error) {
       setStatus("error");
       pushError(error instanceof Error ? error.message : "This PDF could not be parsed.");
@@ -164,21 +178,6 @@ export default function DigestPage() {
     } catch {
       setStatus("error");
       pushError("That document could not be loaded from local storage.");
-    }
-  }
-
-  async function handleRemove(summaryId: string): Promise<void> {
-    try {
-      await removeDocument(summaryId);
-      if (selected?.id === summaryId) {
-        setSelected(null);
-        setSelectedFile(null);
-        setSelectedNodeId(null);
-      }
-      await refreshSummaries();
-    } catch {
-      setStatus("error");
-      pushError("The document could not be removed from local storage.");
     }
   }
 
@@ -243,20 +242,6 @@ export default function DigestPage() {
               onReferenceClick={handleReferenceClick}
             />
           ))}
-
-          {!selected && summaries.length > 0 && (
-            <div className="doc-chips">
-              <span className="doc-chips-label">recent sessions</span>
-              <div className="doc-chips-row">
-                {summaries.map((summary) => (
-                  <button className="doc-chip" key={summary.id} onClick={() => void handleSelect(summary.id)} type="button">
-                    <Icon name="tree" size={13} />
-                    <span>{summary.fileName}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <form className="chat-composer" onSubmit={handleAsk}>

@@ -3,8 +3,8 @@ import type { ChangeEvent, DragEvent, RefObject } from "react";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
-import { getDecksWithStarter, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
-import type { AppView, CsvValidationResult, Deck, Flashcard, Rating, StudySession } from "./types";
+import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
+import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
 
 const DigestPage = lazy(() => import("./pages/DigestPage"));
 
@@ -98,6 +98,10 @@ export default function App() {
       return false;
     }
   });
+  const [openPanel, setOpenPanel] = useState<"sessions" | "decks" | null>(null);
+  const [sessionToken, setSessionToken] = useState(0);
+  const [focusDoc, setFocusDoc] = useState<{ id: string; nonce: number } | null>(null);
+  const [digestSessions, setDigestSessions] = useState<DocumentSummary[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toggleRail(): void {
@@ -110,6 +114,27 @@ export default function App() {
       }
       return next;
     });
+  }
+
+  function refreshDigestSessions(): void {
+    void getDocumentSummaries()
+      .then(setDigestSessions)
+      .catch(() => setDigestSessions([]));
+  }
+
+  function togglePanel(panel: "sessions" | "decks"): void {
+    if (panel === "sessions") refreshDigestSessions();
+    setOpenPanel((current) => (current === panel ? null : panel));
+  }
+
+  function openSession(sessionId: string): void {
+    setView("digest");
+    setFocusDoc({ id: sessionId, nonce: Date.now() });
+  }
+
+  function beginDigestSession(): void {
+    setView("digest");
+    setSessionToken((token) => token + 1);
   }
 
   const activeDeck = decks.find((deck) => deck.id === activeDeckId);
@@ -410,9 +435,14 @@ export default function App() {
         decks={decks}
         onDeleteDeck={deleteDeck}
         onImport={openImporter}
+        onNewSession={beginDigestSession}
+        onOpenSession={openSession}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
         onToggleCollapse={toggleRail}
+        onTogglePanel={togglePanel}
+        openPanel={openPanel}
+        sessions={digestSessions}
         view={view}
       />
 
@@ -482,7 +512,7 @@ export default function App() {
           />
         ) : view === "digest" ? (
           <Suspense fallback={<div className="loading-workspace"><span className="loading-orbit"><Icon name="spark" size={20} /></span><strong>Loading the digest bench...</strong><small>Preparing the local PDF parser</small></div>}>
-            <DigestPage />
+            <DigestPage focusDoc={focusDoc} sessionToken={sessionToken} />
           </Suspense>
         ) : (
           <LibraryView
@@ -532,15 +562,35 @@ interface SidebarProps {
   activeDeckId: string | null;
   collapsed: boolean;
   decks: Deck[];
+  openPanel: "sessions" | "decks" | null;
+  sessions: DocumentSummary[];
   view: AppView;
   onSetView: (view: AppView) => void;
   onToggleCollapse: () => void;
+  onTogglePanel: (panel: "sessions" | "decks") => void;
+  onOpenSession: (sessionId: string) => void;
+  onNewSession: () => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
 }
 
-function Sidebar({ activeDeckId, collapsed, decks, onDeleteDeck, onImport, onSelectDeck, onSetView, onToggleCollapse, view }: SidebarProps) {
+function Sidebar({
+  activeDeckId,
+  collapsed,
+  decks,
+  onDeleteDeck,
+  onImport,
+  onNewSession,
+  onOpenSession,
+  onSelectDeck,
+  onSetView,
+  onToggleCollapse,
+  onTogglePanel,
+  openPanel,
+  sessions,
+  view,
+}: SidebarProps) {
   return (
     <aside className={`sidebar ${collapsed ? "is-rail" : ""}`}>
       <button
@@ -570,50 +620,71 @@ function Sidebar({ activeDeckId, collapsed, decks, onDeleteDeck, onImport, onSel
           <span>Study desk</span>
           {activeDeckId && <span className="nav-indicator" />}
         </button>
+
         <button
-          className={`nav-item ${view === "digest" ? "active" : ""}`}
-          onClick={() => onSetView("digest")}
+          className={`nav-item nav-trigger ${openPanel === "sessions" ? "is-open" : ""} ${view === "digest" ? "active" : ""}`}
+          onClick={() => {
+            onSetView("digest");
+            if (!collapsed) onTogglePanel("sessions");
+          }}
           title={collapsed ? "Case digest" : undefined}
           type="button"
         >
           <Icon name="tree" size={18} />
           <span>Case digest</span>
+          <Icon className="panel-caret" name="chevron-down" size={14} />
         </button>
+        {!collapsed && openPanel === "sessions" && (
+          <div className="sub-panel">
+            {sessions.length ? sessions.map((session) => (
+              <button className="sub-item" key={session.id} onClick={() => onOpenSession(session.id)} type="button">
+                <Icon name="tree" size={13} />
+                <span>{session.fileName}</span>
+              </button>
+            )) : (
+              <p className="sub-empty">No digested documents yet.</p>
+            )}
+            <button className="sub-item sub-new" onClick={onNewSession} type="button">
+              <Icon name="plus" size={13} />
+              <span>New session</span>
+            </button>
+          </div>
+        )}
+
         <button
-          className={`nav-item ${view === "library" ? "active" : ""}`}
-          onClick={() => onSetView("library")}
+          className={`nav-item nav-trigger ${openPanel === "decks" ? "is-open" : ""} ${view === "library" ? "active" : ""}`}
+          onClick={() => {
+            onSetView("library");
+            if (!collapsed) onTogglePanel("decks");
+          }}
           title={collapsed ? "Deck library" : undefined}
           type="button"
         >
           <Icon name="grid" size={18} />
           <span>Deck library</span>
-          <span className="nav-count">{decks.length}</span>
+          <Icon className="panel-caret" name="chevron-down" size={14} />
         </button>
-      </nav>
-
-      <div className="sidebar-label deck-label-row">
-        <span>your decks</span>
-        <button aria-label="Import a deck" className="sidebar-add" onClick={onImport} type="button"><Icon name="plus" size={15} /></button>
-      </div>
-      <div className="deck-list">
-        {decks.slice(0, 5).map((deck, index) => (
-          <div className={`deck-list-row ${activeDeckId === deck.id ? "selected" : ""}`} key={deck.id}>
-            <button
-              className="deck-list-button"
-              onClick={() => onSelectDeck(deck.id)}
-              title={collapsed ? `${deck.name} · ${deck.cards.length} cards` : undefined}
-              type="button"
-            >
-              <span className={`deck-dot dot-${index % 4}`} />
-              <span className="deck-list-copy"><strong>{deck.name}</strong><small>{deck.cards.length} cards</small></span>
+        {!collapsed && openPanel === "decks" && (
+          <div className="sub-panel">
+            {decks.map((deck, index) => (
+              <div className={`sub-row ${activeDeckId === deck.id ? "active" : ""}`} key={deck.id}>
+                <button className="sub-item" onClick={() => onSelectDeck(deck.id)} type="button">
+                  <span className={`deck-dot dot-${index % 4}`} />
+                  <span>{deck.name}</span>
+                </button>
+                <button aria-label={`Remove ${deck.name}`} className="sub-remove" onClick={() => onDeleteDeck(deck.id)} type="button">
+                  <Icon name="trash" size={12} />
+                </button>
+              </div>
+            ))}
+            {decks.length === 0 && <p className="sub-empty">No decks yet.</p>}
+            <button className="sub-item sub-new" onClick={onImport} type="button">
+              <Icon name="plus" size={13} />
+              <span>New deck</span>
             </button>
-            {!collapsed && (
-              <button aria-label={`Remove ${deck.name}`} className="deck-delete" onClick={() => onDeleteDeck(deck.id)} type="button"><Icon name="more" size={16} /></button>
-            )}
           </div>
-        ))}
-        {decks.length > 5 && !collapsed && <button className="show-all-button" onClick={() => onSetView("library")} type="button">View all decks <Icon name="arrow-right" size={14} /></button>}
-      </div>
+        )}
+      </nav>
 
       <button className="import-prompt" onClick={onImport} title={collapsed ? "Bring your own — drop in a CSV deck" : undefined} type="button">
         <span className="import-prompt-icon"><Icon name="upload" size={17} /></span>
