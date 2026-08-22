@@ -2773,3 +2773,91 @@ input:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------------------------------- case digest graph ---------------------------------- */
+
+.digest-graph {
+  position: relative;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(218, 250, 113, 0.16), transparent 20rem),
+    var(--paper-bright);
+}
+
+.digest-graph-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.digest-graph-canvas canvas {
+  outline: none;
+}
+
+.digest-graph-legend {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  left: 16px;
+  display: flex;
+  gap: 14px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(252, 252, 247, 0.88);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.digest-graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.digest-graph-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.digest-graph-tooltip {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  max-width: 320px;
+  align-items: center;
+  gap: 10px;
+  margin: -44px 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid rgba(29, 52, 50, 0.16);
+  border-radius: 12px;
+  background: var(--ink);
+  box-shadow: 0 10px 26px rgba(29, 52, 50, 0.22);
+  color: var(--paper-bright);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: auto;
+  transform-origin: top left;
+}
+
+.digest-graph-tooltip .tooltip-section {
+  color: var(--lime);
+  overflow-wrap: anywhere;
+}
+
+.digest-graph-tooltip .tooltip-page {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(218, 250, 113, 0.16);
+  color: var(--paper-bright);
+  white-space: nowrap;
+}
