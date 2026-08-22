@@ -45,6 +45,7 @@ function cleanInline(text: string): string {
   return text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<\/?[a-zA-Z][^>]*>/g, "") // stray inline markup such as <u>
     .replace(/[*_`]+([^*_`]*)[*_`]+/g, "$1")
     .replace(/\s+/g, " ")
     .trim();

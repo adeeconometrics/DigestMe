@@ -104,7 +104,7 @@ export default function DigestGraph({ tree, className }: DigestGraphProps) {
           type="button"
         >
           <span className="tooltip-section">({hoveredPayload.section || "root"})</span>
-          <span className="tooltip-page">p{hoveredPayload.page ?? "?"}</span>
+          {hoveredPayload.page !== null && <span className="tooltip-page">p{hoveredPayload.page}</span>}
         </button>
       )}
     </div>
