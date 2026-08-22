@@ -3399,3 +3399,111 @@ input:focus-visible,
   color: var(--paper-bright);
   white-space: nowrap;
 }
+
+/* ---------------------------------- collapsible sidebar rail ---------------------------------- */
+
+.main-content {
+  transition: margin-left 220ms ease;
+}
+
+.app-shell.has-rail .main-content {
+  margin-left: 74px;
+}
+
+.sidebar {
+  transition: width 220ms ease;
+}
+
+.sidebar.is-rail {
+  width: 74px;
+  padding-left: 11px;
+  padding-right: 11px;
+}
+
+.rail-toggle {
+  position: absolute;
+  z-index: 6;
+  top: 34px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper-bright);
+  color: var(--ink-faint);
+}
+
+.rail-toggle:hover {
+  color: var(--ink);
+  border-color: var(--lime-dark);
+}
+
+.rail-toggle svg {
+  transition: transform 220ms ease;
+}
+
+.sidebar.is-rail .rail-toggle svg {
+  transform: rotate(180deg);
+}
+
+.sidebar.is-rail .brand-lockup {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.is-rail .brand-word,
+.sidebar.is-rail .sidebar-label,
+.sidebar.is-rail .nav-item > span,
+.sidebar.is-rail .deck-list-copy,
+.sidebar.is-rail .show-all-button,
+.sidebar.is-rail .import-prompt > span:not(.import-prompt-icon),
+.sidebar.is-rail .prompt-arrow,
+.sidebar.is-rail .profile-copy {
+  display: none;
+}
+
+.sidebar.is-rail .main-nav {
+  justify-items: stretch;
+}
+
+.sidebar.is-rail .nav-item {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
+.sidebar.is-rail .sidebar-label {
+  color: transparent;
+  user-select: none;
+}
+
+.sidebar.is-rail .deck-label-row {
+  justify-content: center;
+}
+
+.sidebar.is-rail .sidebar-add {
+  margin-left: 0;
+}
+
+.sidebar.is-rail .deck-list-row {
+  justify-content: center;
+}
+
+.sidebar.is-rail .deck-list-button {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
+.sidebar.is-rail .import-prompt {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.sidebar.is-rail .profile-row {
+  justify-content: center;
+  padding: 7px 0;
+  background: transparent;
+}

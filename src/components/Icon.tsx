@@ -6,6 +6,7 @@ export type IconName =
   | "cards"
   | "check"
   | "chevron-down"
+  | "chevron-left"
   | "chevron-right"
   | "close"
   | "clock"
@@ -39,6 +40,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: 
     cards: <><rect x="5" y="5" width="13" height="15" rx="2" /><path d="M8 2h9a2 2 0 0 1 2 2v14" /><path d="M9 10h5" /><path d="M9 14h3" /></>,
     check: <path d="m5 12 4.2 4.2L19.5 6" />,
     "chevron-down": <path d="m6 9 6 6 6-6" />,
+    "chevron-left": <path d="m15 18-6-6 6-6" />,
     "chevron-right": <path d="m9 6 6 6-6 6" />,
     close: <><path d="m6 6 12 12" /><path d="m18 6-12 12" /></>,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,

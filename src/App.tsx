@@ -91,7 +91,26 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [renameState, setRenameState] = useState<{ deckId: string; name: string } | null>(null);
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("digestme-rail") === "1";
+    } catch {
+      return false;
+    }
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function toggleRail(): void {
+    setRailCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        window.localStorage.setItem("digestme-rail", next ? "1" : "0");
+      } catch {
+        /* private mode: state still applies for this page load */
+      }
+      return next;
+    });
+  }
 
   const activeDeck = decks.find((deck) => deck.id === activeDeckId);
   const currentCardId = studyOrder[currentIndex];
@@ -384,14 +403,16 @@ export default function App() {
   }, [currentCard, isComplete, isFlipped, isImporterOpen, view]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${railCollapsed ? "has-rail" : ""}`}>
       <Sidebar
         activeDeckId={activeDeckId}
+        collapsed={railCollapsed}
         decks={decks}
         onDeleteDeck={deleteDeck}
         onImport={openImporter}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
+        onToggleCollapse={toggleRail}
         view={view}
       />
 
@@ -509,17 +530,29 @@ export default function App() {
 
 interface SidebarProps {
   activeDeckId: string | null;
+  collapsed: boolean;
   decks: Deck[];
   view: AppView;
   onSetView: (view: AppView) => void;
+  onToggleCollapse: () => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
 }
 
-function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, onSetView, view }: SidebarProps) {
+function Sidebar({ activeDeckId, collapsed, decks, onDeleteDeck, onImport, onSelectDeck, onSetView, onToggleCollapse, view }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? "is-rail" : ""}`}>
+      <button
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="rail-toggle"
+        onClick={onToggleCollapse}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        type="button"
+      >
+        <Icon name="chevron-left" size={15} />
+      </button>
       <div className="brand-lockup">
         <span className="brand-mark"><Icon name="spark" size={18} /></span>
         <span className="brand-word">Digest Me</span>
@@ -527,16 +560,31 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
 
       <div className="sidebar-label">workspace</div>
       <nav className="main-nav">
-        <button className={`nav-item ${view === "study" ? "active" : ""}`} onClick={() => onSetView("study")} type="button">
+        <button
+          className={`nav-item ${view === "study" ? "active" : ""}`}
+          onClick={() => onSetView("study")}
+          title={collapsed ? "Study desk" : undefined}
+          type="button"
+        >
           <Icon name="book" size={18} />
           <span>Study desk</span>
           {activeDeckId && <span className="nav-indicator" />}
         </button>
-        <button className={`nav-item ${view === "digest" ? "active" : ""}`} onClick={() => onSetView("digest")} type="button">
+        <button
+          className={`nav-item ${view === "digest" ? "active" : ""}`}
+          onClick={() => onSetView("digest")}
+          title={collapsed ? "Case digest" : undefined}
+          type="button"
+        >
           <Icon name="tree" size={18} />
           <span>Case digest</span>
         </button>
-        <button className={`nav-item ${view === "library" ? "active" : ""}`} onClick={() => onSetView("library")} type="button">
+        <button
+          className={`nav-item ${view === "library" ? "active" : ""}`}
+          onClick={() => onSetView("library")}
+          title={collapsed ? "Deck library" : undefined}
+          type="button"
+        >
           <Icon name="grid" size={18} />
           <span>Deck library</span>
           <span className="nav-count">{decks.length}</span>
@@ -550,17 +598,24 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
       <div className="deck-list">
         {decks.slice(0, 5).map((deck, index) => (
           <div className={`deck-list-row ${activeDeckId === deck.id ? "selected" : ""}`} key={deck.id}>
-            <button className="deck-list-button" onClick={() => onSelectDeck(deck.id)} type="button">
+            <button
+              className="deck-list-button"
+              onClick={() => onSelectDeck(deck.id)}
+              title={collapsed ? `${deck.name} · ${deck.cards.length} cards` : undefined}
+              type="button"
+            >
               <span className={`deck-dot dot-${index % 4}`} />
               <span className="deck-list-copy"><strong>{deck.name}</strong><small>{deck.cards.length} cards</small></span>
             </button>
-            <button aria-label={`Remove ${deck.name}`} className="deck-delete" onClick={() => onDeleteDeck(deck.id)} type="button"><Icon name="more" size={16} /></button>
+            {!collapsed && (
+              <button aria-label={`Remove ${deck.name}`} className="deck-delete" onClick={() => onDeleteDeck(deck.id)} type="button"><Icon name="more" size={16} /></button>
+            )}
           </div>
         ))}
-        {decks.length > 5 && <button className="show-all-button" onClick={() => onSetView("library")} type="button">View all decks <Icon name="arrow-right" size={14} /></button>}
+        {decks.length > 5 && !collapsed && <button className="show-all-button" onClick={() => onSetView("library")} type="button">View all decks <Icon name="arrow-right" size={14} /></button>}
       </div>
 
-      <button className="import-prompt" onClick={onImport} type="button">
+      <button className="import-prompt" onClick={onImport} title={collapsed ? "Bring your own — drop in a CSV deck" : undefined} type="button">
         <span className="import-prompt-icon"><Icon name="upload" size={17} /></span>
         <span><strong>Bring your own</strong><small>Drop in a CSV deck</small></span>
         <Icon className="prompt-arrow" name="arrow-right" size={16} />
