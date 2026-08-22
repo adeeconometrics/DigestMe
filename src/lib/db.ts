@@ -1,11 +1,14 @@
 import { STARTER_DECK } from "../data/starter";
-import type { Deck, StudySession } from "../types";
+import type { ParsedDocument } from "../parser";
+import { flattenTree } from "../parser";
+import type { Deck, DocumentSummary, StudySession } from "../types";
 
 const DATABASE_NAME = "recall-studio";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const DECK_STORE = "decks";
 const SESSION_STORE = "sessions";
 const META_STORE = "meta";
+const DOCUMENT_STORE = "documents";
 const STARTER_SEEDED_KEY = "starter-seeded";
 
 let databasePromise: Promise<IDBDatabase> | undefined;
@@ -32,6 +35,9 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!database.objectStoreNames.contains(META_STORE)) {
         database.createObjectStore(META_STORE, { keyPath: "key" });
+      }
+      if (!database.objectStoreNames.contains(DOCUMENT_STORE)) {
+        database.createObjectStore(DOCUMENT_STORE, { keyPath: "id" });
       }
     };
 
@@ -115,4 +121,41 @@ export async function removeSessionsForDeck(deckId: string): Promise<void> {
       cursor.continue();
     };
   });
+}
+
+export async function putDocument(document: ParsedDocument): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, DOCUMENT_STORE, "readwrite", (store) => store.put(document));
+}
+
+export async function getDocument(documentId: string): Promise<ParsedDocument | undefined> {
+  const database = await openDatabase();
+  return requestValue<ParsedDocument | undefined>(
+    database.transaction(DOCUMENT_STORE, "readonly").objectStore(DOCUMENT_STORE).get(documentId),
+  );
+}
+
+export async function removeDocument(documentId: string): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, DOCUMENT_STORE, "readwrite", (store) => store.delete(documentId));
+}
+
+/** Returns parsed documents newest-first. */
+export async function getDocuments(): Promise<ParsedDocument[]> {
+  const database = await openDatabase();
+  const documents = await requestValue<ParsedDocument[]>(database.transaction(DOCUMENT_STORE, "readonly").objectStore(DOCUMENT_STORE).getAll());
+  return documents.sort((left, right) => right.parsedAt.localeCompare(left.parsedAt));
+}
+
+/** Listing entries without shipping every tree to the UI at once. */
+export async function getDocumentSummaries(): Promise<DocumentSummary[]> {
+  const documents = await getDocuments();
+  return documents.map((document) => ({
+    id: document.id,
+    fileName: document.fileName,
+    parsedAt: document.parsedAt,
+    pageCount: document.metrics.pageCount,
+    pdfType: document.metrics.pdfType,
+    nodeCount: flattenTree(document.root).length,
+  }));
 }

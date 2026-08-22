@@ -44,4 +44,14 @@ export interface CsvValidationResult {
 }
 
 export type Rating = "again" | "hard" | "known";
-export type AppView = "study" | "library";
+export type AppView = "study" | "library" | "digest";
+
+/** Lightweight listing entry derived from a stored ParsedDocument. */
+export interface DocumentSummary {
+  id: string;
+  fileName: string;
+  parsedAt: string;
+  pageCount: number;
+  pdfType: string;
+  nodeCount: number;
+}
