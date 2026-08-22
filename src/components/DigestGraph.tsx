@@ -19,6 +19,8 @@ interface DigestGraphProps {
   className?: string;
   /** Fired when a node is clicked (as opposed to dragged). */
   onSelectNode?: (node: SelectedNode) => void;
+  /** External request to pan the camera to a node (chat references). */
+  focusRequest?: { nodeId: string; nonce: number } | null;
 }
 
 /** Low-energy force settings so idle graphs drift organically instead of jittering. */
@@ -40,7 +42,7 @@ function physicsSettings(graph: Parameters<typeof forceAtlas2.inferSettings>[0])
  *   layout fluid and settles back down once interactions stop.
  * - Clicking (press + release without drag) reports the node upward.
  */
-export default function DigestGraph({ tree, className, onSelectNode }: DigestGraphProps) {
+export default function DigestGraph({ tree, className, onSelectNode, focusRequest }: DigestGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma<TreeNodePayload> | null>(null);
   const [hovered, setHovered] = useState<HoveredNode | null>(null);
@@ -173,6 +175,12 @@ export default function DigestGraph({ tree, className, onSelectNode }: DigestGra
       { duration: 320 },
     );
   }
+
+  // Chat-driven focus: pan to the node a reference card points at.
+  useEffect(() => {
+    if (!focusRequest) return;
+    focusNode(focusRequest.nodeId);
+  }, [focusRequest]);
 
   const hoveredPayload = hovered ? graph.getNodeAttributes(hovered.id) : null;
 

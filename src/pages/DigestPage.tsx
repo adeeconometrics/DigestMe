@@ -1,76 +1,128 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
 import { getDocumentSummaries, getDocumentWithSource, putDocumentWithFile, removeDocument } from "../lib/db";
 import type { StoredDocumentFile } from "../lib/db";
 import { flattenTree, isPdfFile, parsePdf } from "../parser";
 import type { DocumentNode, ParsedDocument } from "../parser";
+import { retrieveNodes } from "../chat/retrieval";
+import type { RetrievalHit } from "../chat/retrieval";
 import type { DocumentSummary } from "../types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 
 type DigestStatus = "idle" | "parsing" | "error";
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+interface ChatMessageBase {
+  id: string;
+  at: string;
 }
 
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "recently";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+type ChatMessage =
+  | (ChatMessageBase & { role: "assistant"; kind: "welcome" })
+  | (ChatMessageBase & { role: "assistant"; kind: "nudge" })
+  | (ChatMessageBase & { role: "assistant"; kind: "error"; text: string })
+  | (ChatMessageBase & { role: "user"; kind: "attachment"; fileName: string })
+  | (ChatMessageBase & { role: "user"; kind: "question"; text: string })
+  | (ChatMessageBase & {
+      role: "assistant";
+      kind: "parse-summary";
+      fileName: string;
+      pageCount: number;
+      nodeCount: number;
+      ms: number;
+      pdfType: string;
+    })
+  | (ChatMessageBase & { role: "assistant"; kind: "references"; query: string; refs: RetrievalHit[] });
+
+function makeMessageId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return `msg-${randomId ?? Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-/** Case digest: upload a PDF, parse it on-device, explore its context tree. */
+function welcomeMessage(): ChatMessage {
+  return { id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "welcome" };
+}
+
+/** Case digest: a chat session over a locally parsed PDF. */
 export default function DigestPage() {
   const [summaries, setSummaries] = useState<DocumentSummary[]>([]);
   const [selected, setSelected] = useState<ParsedDocument | null>(null);
   const [selectedFile, setSelectedFile] = useState<StoredDocumentFile | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
-  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
+  const [draft, setDraft] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
     return flattenTree(selected.root).find((node) => node.id === selectedNodeId) ?? null;
   }, [selected, selectedNodeId]);
 
+  const pushMessage = useCallback((message: ChatMessage): void => {
+    setMessages((previous) => [...previous, message]);
+  }, []);
+
+  // Keep the newest message in view as the thread grows.
+  useEffect(() => {
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [messages]);
+
+  const pushError = useCallback((text: string): void => {
+    pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "error", text });
+  }, [pushMessage]);
+
   const refreshSummaries = useCallback(() => {
     return getDocumentSummaries()
       .then(setSummaries)
-      .catch(() => setMessage("IndexedDB is unavailable, so parsed documents will not be saved."));
-  }, []);
+      .catch(() => pushError("IndexedDB is unavailable, so parsed documents will not be saved."));
+  }, [pushError]);
 
   useEffect(() => {
     void refreshSummaries();
   }, [refreshSummaries]);
 
+  function openSession(parsed: ParsedDocument, file: StoredDocumentFile): void {
+    setSelected(parsed);
+    setSelectedFile(file);
+    setSelectedNodeId(null);
+    setStatus("idle");
+    pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "attachment", fileName: parsed.fileName });
+    pushMessage({
+      id: makeMessageId(),
+      at: new Date().toISOString(),
+      role: "assistant",
+      kind: "parse-summary",
+      fileName: parsed.fileName,
+      pageCount: parsed.metrics.pageCount,
+      nodeCount: flattenTree(parsed.root).length,
+      ms: parsed.metrics.processingTimeMs,
+      pdfType: parsed.metrics.pdfType,
+    });
+  }
+
   async function processPdf(file: File): Promise<void> {
     if (!isPdfFile(file)) {
-      setStatus("error");
-      setMessage("That file is not a PDF. Choose a file ending in .pdf.");
+      pushError("That file is not a PDF — choose one ending in .pdf.");
       return;
     }
 
     setStatus("parsing");
-    setMessage(`Reading ${file.name} on-device...`);
-
     try {
       const parsed = await parsePdf(file);
+      const stored: StoredDocumentFile = { id: parsed.id, fileName: file.name, mimeType: file.type || "application/pdf", blob: file };
       await putDocumentWithFile(parsed, file);
-      setSelected(parsed);
-      setSelectedFile({ id: parsed.id, fileName: file.name, mimeType: file.type || "application/pdf", blob: file });
-      setStatus("idle");
-      setMessage(`${parsed.fileName} parsed into its context tree.`);
+      openSession(parsed, stored);
       await refreshSummaries();
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "This PDF could not be parsed.");
+      pushError(error instanceof Error ? error.message : "This PDF could not be parsed.");
     }
   }
 
@@ -80,7 +132,7 @@ export default function DigestPage() {
     event.target.value = "";
   }
 
-  function handleDrop(event: DragEvent<HTMLLabelElement>): void {
+  function handleDrop(event: DragEvent<HTMLElement>): void {
     event.preventDefault();
     setIsDragging(false);
     const file = event.dataTransfer.files[0];
@@ -96,11 +148,22 @@ export default function DigestPage() {
         setSelectedFile(source.file);
         setSelectedNodeId(null);
         setStatus("idle");
-        setMessage("");
+        pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "attachment", fileName: source.document.fileName });
+        pushMessage({
+          id: makeMessageId(),
+          at: new Date().toISOString(),
+          role: "assistant",
+          kind: "parse-summary",
+          fileName: source.document.fileName,
+          pageCount: source.document.metrics.pageCount,
+          nodeCount: flattenTree(source.document.root).length,
+          ms: source.document.metrics.processingTimeMs,
+          pdfType: source.document.metrics.pdfType,
+        });
       }
     } catch {
       setStatus("error");
-      setMessage("That document could not be loaded from local storage.");
+      pushError("That document could not be loaded from local storage.");
     }
   }
 
@@ -115,98 +178,122 @@ export default function DigestPage() {
       await refreshSummaries();
     } catch {
       setStatus("error");
-      setMessage("The document could not be removed from local storage.");
+      pushError("The document could not be removed from local storage.");
     }
   }
 
-  const totalPages = summaries.reduce((sum, summary) => sum + summary.pageCount, 0);
+  /** Local retrieval: answers questions with references into the parsed tree. */
+  function handleAsk(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const question = draft.trim();
+    if (!question) return;
+    setDraft("");
+
+    pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: question });
+
+    if (!selected) {
+      pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "nudge" });
+      return;
+    }
+
+    const refs = retrieveNodes(selected.root, question, 3);
+    pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "references", query: question, refs });
+  }
+
+  function handleReferenceClick(hit: RetrievalHit): void {
+    setSelectedNodeId(hit.nodeId);
+    setFocusRequest({ nodeId: hit.nodeId, nonce: Date.now() });
+  }
+
+  function handleGraphNodeSelect(node: { id: string }): void {
+    setSelectedNodeId(node.id);
+  }
 
   return (
-    <div className="page digest-page">
-      <section className="library-heading">
-        <div>
-          <div className="eyebrow"><span className="eyebrow-line" /> case digest</div>
-          <h1>Digest your <em>cases.</em></h1>
-          <p>Drop in a PDF and watch its sections become a map you can hover, zoom, and revisit.</p>
-        </div>
-        <span className="digest-local-note"><Icon name="check" size={14} /> parsed on-device, nothing is uploaded</span>
-      </section>
-
-      <section className="library-stats">
-        <div className="library-stat"><span className="stat-icon mint"><Icon name="tree" size={18} /></span><span><strong>{summaries.length}</strong><small>documents digested</small></span></div>
-        <div className="library-stat"><span className="stat-icon peach"><Icon name="book" size={18} /></span><span><strong>{totalPages}</strong><small>pages mapped</small></span></div>
-        <div className="library-stat"><span className="stat-icon lilac"><Icon name="spark" size={18} /></span><span><strong>{selected ? `${selected.metrics.pdfType}` : "—"}</strong><small>last parse type</small></span></div>
-      </section>
-
-      <label
-        className={`pdf-drop ${isDragging ? "is-dragging" : ""}`}
-        onDragLeave={() => setIsDragging(false)}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDrop={handleDrop}
-      >
-        <input accept=".pdf,application/pdf" className="visually-hidden" onChange={handleFileChange} ref={fileInputRef} type="file" />
-        <span className="pdf-drop-icon"><Icon name="upload" size={20} /></span>
-        <span className="pdf-drop-copy">
-          <strong>{status === "parsing" ? "Parsing your document..." : "Drop a case PDF here"}</strong>
-          <small>or <button onClick={(event) => { event.preventDefault(); fileInputRef.current?.click(); }} type="button">browse files</button> · runs locally with pdf-inspector</small>
-        </span>
-        {status === "parsing" && <span className="pdf-drop-spinner" aria-label="Parsing" />}
-      </label>
-
-      {message && <div className={`digest-status ${status === "error" ? "is-error" : ""}`} role="status">{message}</div>}
-
-      <div className={`digest-layout ${selectedFile ? "with-viewer" : ""}`}>
-        <aside className="digest-docs">
-          <div className="panel-heading"><span>parsed documents</span><Icon name="layers" size={16} /></div>
-          {summaries.length ? summaries.map((summary) => (
-            <div className={`doc-row ${selected?.id === summary.id ? "selected" : ""}`} key={summary.id}>
-              <button className="doc-row-button" onClick={() => void handleSelect(summary.id)} type="button">
-                <span className="doc-row-icon"><Icon name="tree" size={16} /></span>
-                <span className="doc-row-copy">
-                  <strong>{summary.fileName}</strong>
-                  <small>{summary.pageCount} pages · {summary.nodeCount} nodes · {formatDate(summary.parsedAt)}</small>
-                </span>
-              </button>
-              <button aria-label={`Remove ${summary.fileName}`} className="doc-row-remove" onClick={() => void handleRemove(summary.id)} type="button"><Icon name="trash" size={14} /></button>
+    <div
+      className={`digest-session ${isDragging ? "is-dragging" : ""}`}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setIsDragging(false);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setIsDragging(true);
+      }}
+      onDrop={handleDrop}
+    >
+      <section className="session-chat">
+        <header className="session-header">
+          <div className="session-title">
+            <span className="session-mark"><Icon name="spark" size={16} /></span>
+            <div>
+              <strong>{selected ? selected.fileName : "Case digest session"}</strong>
+              <small>{selected ? `${selected.metrics.pageCount} pages · parsed on-device` : "attach a case file to begin"}</small>
             </div>
-          )) : (
-            <p className="digest-docs-empty">Nothing digested yet. Your parsed documents will live here, stored in IndexedDB on this device.</p>
+          </div>
+          {selected && (
+            <span className="session-badge"><Icon name="check" size={12} /> local</span>
           )}
-        </aside>
+        </header>
 
-        <section className="graph-panel">
-          {selected ? (
-            <>
-              <div className="graph-panel-heading">
-                <div>
-                  <h2>{selected.fileName}</h2>
-                  <div className="metric-chips">
-                    <span className="metric-chip">{selected.metrics.pageCount} pages</span>
-                    <span className="metric-chip">{formatBytes(selected.fileSizeBytes)}</span>
-                    <span className="metric-chip">{selected.metrics.processingTimeMs} ms parse</span>
-                    <span className="metric-chip">pdf-inspector v{selected.parserVersion}</span>
-                  </div>
-                </div>
-                <span className="graph-hint">hover for (section, p#) · click to open the source</span>
+        <div className="chat-log" ref={logRef}>
+          {messages.map((message) => (
+            <ChatBubble
+              key={message.id}
+              message={message}
+              onReferenceClick={handleReferenceClick}
+            />
+          ))}
+
+          {!selected && summaries.length > 0 && (
+            <div className="doc-chips">
+              <span className="doc-chips-label">recent sessions</span>
+              <div className="doc-chips-row">
+                {summaries.map((summary) => (
+                  <button className="doc-chip" key={summary.id} onClick={() => void handleSelect(summary.id)} type="button">
+                    <Icon name="tree" size={13} />
+                    <span>{summary.fileName}</span>
+                  </button>
+                ))}
               </div>
-              <DigestGraph
-                tree={selected.root}
-                onSelectNode={(node) => setSelectedNodeId(node.id)}
-              />
-            </>
-          ) : (
-            <div className="graph-empty">
-              <span className="graph-empty-icon"><Icon name="tree" size={26} /></span>
-              <h2>Your context map is waiting.</h2>
-              <p>Upload a PDF above or pick a previously digested document to see its structure.</p>
             </div>
           )}
-        </section>
+        </div>
 
-        {selected && selectedFile && (
+        <form className="chat-composer" onSubmit={handleAsk}>
+          <input accept=".pdf,application/pdf" className="visually-hidden" onChange={handleFileChange} ref={fileInputRef} type="file" />
+          <button
+            aria-label="Attach a PDF"
+            className={`composer-attach ${status === "parsing" ? "is-busy" : ""}`}
+            disabled={status === "parsing"}
+            onClick={() => fileInputRef.current?.click()}
+            title={status === "parsing" ? "Parsing on-device..." : "Attach a PDF"}
+            type="button"
+          >
+            <Icon name="upload" size={17} />
+          </button>
+          <input
+            aria-label="Ask about the document"
+            autoComplete="off"
+            className="composer-input"
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder={selected ? "Ask about this document..." : "Attach a PDF, then ask away..."}
+            value={draft}
+          />
+          <button aria-label="Send question" className="composer-send" disabled={!draft.trim()} type="submit">
+            <Icon name="arrow-right" size={17} />
+          </button>
+        </form>
+      </section>
+
+      {selected && selectedFile ? (
+        <section className="reference-slice">
+          <div className="slice-graph">
+            <DigestGraph
+              focusRequest={focusRequest}
+              onSelectNode={handleGraphNodeSelect}
+              tree={selected.root}
+            />
+          </div>
           <Suspense fallback={<aside className="pdf-viewer"><div className="pdf-viewer-loading">Preparing the source document...</div></aside>}>
             <PdfReferenceViewer
               file={selectedFile.blob}
@@ -214,6 +301,85 @@ export default function DigestPage() {
               referenceNode={selectedNode}
             />
           </Suspense>
+        </section>
+      ) : (
+        <aside className="reference-slice reference-empty">
+          <span className="reference-empty-icon"><Icon name="book" size={26} /></span>
+          <h2>The source pane is waiting.</h2>
+          <p>Attach a PDF in the chat and its context map plus full document will appear here.</p>
+        </aside>
+      )}
+    </div>
+  );
+}
+
+interface ChatBubbleProps {
+  message: ChatMessage;
+  onReferenceClick: (hit: RetrievalHit) => void;
+}
+
+function ChatBubble({ message, onReferenceClick }: ChatBubbleProps) {
+  if (message.role === "user") {
+    return (
+      <div className="chat-row is-user">
+        <div className={`chat-bubble bubble-${message.kind}`}>
+          {message.kind === "attachment" ? (
+            <>
+              <Icon name="upload" size={14} />
+              <span>Digesting <strong>{message.fileName}</strong></span>
+            </>
+          ) : (
+            <span>{message.text}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat-row is-assistant">
+      <span className="chat-avatar"><Icon name="tree" size={15} /></span>
+      <div className="chat-bubble bubble-assistant">
+        {message.kind === "welcome" && (
+          <>
+            <p><strong>Welcome to the digest bench.</strong></p>
+            <p>Attach a case PDF and I will parse it entirely on your device — sections become the map above-right, and you can ask me anything about the text.</p>
+          </>
+        )}
+        {message.kind === "nudge" && (
+          <p>Attach a PDF first and I will map its structure for you.</p>
+        )}
+        {message.kind === "error" && (
+          <p className="bubble-error">{message.text}</p>
+        )}
+        {message.kind === "parse-summary" && (
+          <>
+            <p><strong>{message.fileName}</strong> is mapped.</p>
+            <div className="metric-chips">
+              <span className="metric-chip">{message.pageCount} pages</span>
+              <span className="metric-chip">{message.nodeCount} nodes</span>
+              <span className="metric-chip">{message.ms} ms</span>
+              <span className="metric-chip">{message.pdfType}</span>
+            </div>
+            <p className="bubble-hint">Hover nodes for (section, p#), click one to jump to the source, or ask me something below.</p>
+          </>
+        )}
+        {message.kind === "references" && (
+          message.refs.length ? (
+            <>
+              <p>I found {message.refs.length} matching passage{message.refs.length === 1 ? "" : "s"}:</p>
+              <div className="reference-list">
+                {message.refs.map((ref) => (
+                  <button className="reference-item" key={ref.nodeId} onClick={() => onReferenceClick(ref)} type="button">
+                    <span className="reference-copy">{ref.snippet}</span>
+                    <span className="reference-meta">({ref.section || "root"} · p{ref.page ?? "?"})</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p>No passages matched that. Try different words from the document.</p>
+          )
         )}
       </div>
     </div>

@@ -2774,307 +2774,401 @@ input:focus-visible,
   }
 }
 
-/* ---------------------------------- case digest page ---------------------------------- */
+/* ---------------------------------- digest session layout ---------------------------------- */
 
-.digest-local-note {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--paper-bright);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  white-space: nowrap;
+.digest-session {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(0, 1.05fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 1780px;
+  margin: 0 auto;
+  padding: 13px clamp(14px, 1.8vw, 26px) 20px;
+  height: max(600px, calc(100vh - 116px));
+  animation: page-in 480ms ease both;
 }
 
-.pdf-drop {
+.session-chat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper-bright);
+}
+
+.session-header {
   display: flex;
   align-items: center;
-  gap: 15px;
-  margin-top: 26px;
-  padding: 18px 20px;
-  border: 1.5px dashed rgba(29, 52, 50, 0.28);
-  border-radius: 19px;
-  background: var(--paper-bright);
-  cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
 }
 
-.pdf-drop:hover,
-.pdf-drop.is-dragging {
-  border-color: var(--lime-dark);
-  background: linear-gradient(120deg, rgba(218, 250, 113, 0.22), rgba(252, 252, 247, 0.9));
+.session-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.pdf-drop-icon {
+.session-mark {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 15px;
+  width: 36px;
+  height: 36px;
+  border-radius: 13px;
   background: var(--lime);
   color: var(--ink);
   flex-shrink: 0;
 }
 
-.pdf-drop-copy {
-  display: grid;
-  gap: 2px;
-}
-
-.pdf-drop-copy strong {
+.session-title strong {
+  display: block;
+  overflow: hidden;
   font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.pdf-drop-copy small {
+.session-title small {
   color: var(--ink-faint);
+  font-size: 11.5px;
 }
 
-.pdf-drop-copy button {
-  padding: 0;
-  background: none;
-  color: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-}
-
-.pdf-drop-spinner {
-  width: 20px;
-  height: 20px;
-  margin-left: auto;
-  border: 3px solid var(--paper-deep);
-  border-top-color: var(--lime-dark);
-  border-radius: 50%;
-  animation: pdf-drop-spin 900ms linear infinite;
-}
-
-@keyframes pdf-drop-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.digest-status {
-  margin-top: 12px;
-  padding: 10px 15px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--lime-dark);
-  border-radius: 13px;
-  background: var(--paper-bright);
-  font-size: 13.5px;
-  color: var(--ink-soft);
-}
-
-.digest-status.is-error {
-  border-left-color: var(--peach);
-  color: #a04b38;
-}
-
-.digest-layout {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 22px;
-  margin-top: 26px;
-  align-items: start;
-}
-
-.digest-docs {
-  display: grid;
-  gap: 8px;
-  padding: 17px;
-  border: 1px solid var(--line);
-  border-radius: 21px;
-  background: var(--paper-bright);
-}
-
-.digest-docs .panel-heading {
-  margin-bottom: 4px;
-}
-
-.doc-row {
-  display: flex;
-  align-items: stretch;
+.session-badge {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  border-radius: 15px;
-  transition: background 140ms ease;
+  padding: 5px 11px;
+  border: 1px solid rgba(184, 216, 86, 0.55);
+  border-radius: 999px;
+  background: rgba(218, 250, 113, 0.28);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
-.doc-row:hover {
-  background: var(--paper-deep);
-}
-
-.doc-row.selected {
-  background: linear-gradient(120deg, rgba(218, 250, 113, 0.35), rgba(218, 250, 113, 0.12));
-}
-
-.doc-row-button {
+.chat-log {
   display: flex;
   flex: 1;
-  align-items: center;
-  gap: 11px;
-  padding: 10px 6px 10px 10px;
-  border-radius: 15px;
-  background: none;
-  text-align: left;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-.doc-row-icon {
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+}
+
+.chat-row.is-user {
+  justify-content: flex-end;
+}
+
+.chat-avatar {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--paper-deep);
   color: var(--ink-soft);
   flex-shrink: 0;
 }
 
-.doc-row.selected .doc-row-icon {
-  background: var(--paper-bright);
+.chat-bubble {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.chat-bubble p {
+  margin: 0 0 6px;
+}
+
+.chat-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-row.is-user .chat-bubble {
+  border-bottom-right-radius: 6px;
+  background: linear-gradient(135deg, var(--lime), #e9faa4);
   color: var(--ink);
 }
 
-.doc-row-copy {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
+.chat-bubble.bubble-attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.doc-row-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13.5px;
+.chat-bubble.bubble-assistant {
+  border: 1px solid var(--line);
+  border-top-left-radius: 6px;
+  background: var(--paper);
 }
 
-.doc-row-copy small {
-  font-size: 11.5px;
+.bubble-hint {
+  margin-top: 2px !important;
   color: var(--ink-faint);
+  font-size: 12px;
 }
 
-.doc-row-remove {
-  align-self: center;
-  padding: 7px;
-  border-radius: 10px;
-  background: none;
-  color: var(--ink-faint);
-}
-
-.doc-row-remove:hover {
-  background: rgba(255, 154, 128, 0.22);
+.bubble-error {
   color: #a04b38;
 }
 
-.digest-docs-empty {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--ink-faint);
-}
-
-.graph-panel {
+.reference-list {
   display: grid;
-  gap: 14px;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.graph-panel-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.graph-panel-heading h2 {
-  overflow: hidden;
-  margin: 0;
-  max-width: 100%;
-  font-size: 19px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 7px;
-}
-
-.metric-chip {
-  padding: 4px 11px;
+.reference-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-left: 3px solid var(--lime-dark);
+  border-radius: 12px;
   background: var(--paper-bright);
+  text-align: left;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.reference-item:hover {
+  border-left-color: #e03131;
+  transform: translateX(2px);
+}
+
+.reference-copy {
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.reference-meta {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-soft);
 }
 
-.graph-hint {
-  font-family: var(--mono);
-  font-size: 11.5px;
+.doc-chips {
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.doc-chips-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
   color: var(--ink-faint);
+}
+
+.doc-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.doc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-deep);
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.doc-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.graph-empty {
-  display: grid;
-  justify-items: center;
-  padding: 70px 30px;
-  border: 1px dashed rgba(29, 52, 50, 0.22);
-  border-radius: 22px;
-  background: var(--paper-bright);
-  text-align: center;
+.doc-chip:hover {
+  border-color: var(--lime-dark);
+  background: rgba(218, 250, 113, 0.25);
 }
 
-.graph-empty-icon {
+.chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.composer-attach,
+.composer-send {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  transition: filter 140ms ease, opacity 140ms ease;
+}
+
+.composer-attach {
+  border: 1.5px dashed rgba(29, 52, 50, 0.32);
+  background: var(--paper-bright);
+  color: var(--ink-soft);
+}
+
+.composer-attach:hover {
+  border-color: var(--lime-dark);
+  background: rgba(218, 250, 113, 0.22);
+  color: var(--ink);
+}
+
+.composer-attach.is-busy {
+  animation: pdf-drop-spin 900ms linear infinite;
+  pointer-events: none;
+}
+
+.composer-send {
+  border: 0;
+  background: var(--ink);
+  color: var(--lime);
+}
+
+.composer-send:hover:not(:disabled) {
+  filter: brightness(1.18);
+}
+
+.composer-send:disabled,
+.composer-attach:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--paper-bright);
+  outline: none;
+}
+
+.composer-input:focus-visible {
+  outline: none;
+  border-color: var(--lime-dark);
+}
+
+/* ---------------------------------- reference slice ---------------------------------- */
+
+.reference-slice {
+  display: grid;
+  grid-template-rows: minmax(170px, 1fr) minmax(0, 3fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.slice-graph {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(218, 250, 113, 0.16), transparent 20rem),
+    var(--paper-bright);
+}
+
+.slice-graph .digest-graph {
+  position: absolute;
+  inset: 0;
+  min-height: unset;
+  border: 0;
+  border-radius: inherit;
+}
+
+.reference-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  border: 1.5px dashed rgba(29, 52, 50, 0.24);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 80% 10%, rgba(218, 250, 113, 0.14), transparent 22rem),
+    var(--paper-bright);
+  text-align: center;
+  padding: 40px;
+}
+
+.reference-empty-icon {
   display: grid;
   place-items: center;
   width: 58px;
   height: 58px;
+  margin-bottom: 8px;
   border-radius: 19px;
   background: var(--lime);
   color: var(--ink);
 }
 
-.graph-empty h2 {
-  margin: 16px 0 6px;
-  font-size: 22px;
+.reference-empty h2 {
+  margin: 0;
+  font-size: 21px;
 }
 
-.graph-empty p {
+.reference-empty p {
   margin: 0;
   max-width: 380px;
-  font-size: 14px;
+  font-size: 13.5px;
   color: var(--ink-soft);
 }
 
-@media (max-width: 1100px) {
-  .digest-layout {
+@media (max-width: 1024px) {
+  .digest-session {
     grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .session-chat {
+    min-height: 70vh;
+  }
+
+  .reference-slice {
+    grid-template-rows: minmax(220px, 1fr) minmax(0, 2fr);
   }
 }
 
 /* ---------------------------------- pdf reference viewer ---------------------------------- */
 
-.digest-layout.with-viewer {
-  grid-template-columns: 240px minmax(0, 1fr) minmax(340px, 30vw);
-}
-
 .pdf-viewer {
   display: flex;
-  min-height: 420px;
-  max-height: calc(100vh - 190px);
-  position: sticky;
-  top: 90px;
+  min-height: 0;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: 20px;
   background: var(--paper-bright);
 }
 
@@ -3083,7 +3177,7 @@ input:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 13px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -3135,7 +3229,7 @@ input:focus-visible,
 }
 
 .pdf-viewer-reference {
-  margin: 12px 14px 0;
+  margin: 10px 14px 0;
   padding: 8px 13px;
   border: 1px solid rgba(29, 52, 50, 0.14);
   border-left: 4px solid #e03131;
@@ -3165,10 +3259,9 @@ input:focus-visible,
 .pdf-viewer-pages {
   flex: 1;
   margin-top: 12px;
-  padding: 2px 14px 18px;
+  padding: 2px 16px 18px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
 }
 
 .pdf-page {
@@ -3211,28 +3304,17 @@ input:focus-visible,
   }
 }
 
-@media (max-width: 1100px) {
-  .pdf-viewer {
-    position: static;
-    max-height: none;
-  }
-}
-
-@media (max-width: 720px) {
-  .pdf-drop {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .digest-local-note {
-    white-space: normal;
+@keyframes pdf-drop-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
 /* ---------------------------------- case digest graph ---------------------------------- */
+
 .digest-graph {
   position: relative;
-  min-height: 420px;
+  min-height: 300px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -3261,16 +3343,16 @@ input:focus-visible,
 .digest-graph-legend {
   position: absolute;
   z-index: 2;
-  top: 14px;
-  left: 16px;
+  top: 12px;
+  left: 14px;
   display: flex;
-  gap: 14px;
-  padding: 7px 13px;
+  gap: 12px;
+  padding: 6px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(252, 252, 247, 0.88);
   backdrop-filter: blur(8px);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
