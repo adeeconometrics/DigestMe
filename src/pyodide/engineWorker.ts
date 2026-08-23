@@ -10,7 +10,7 @@ import toolsSource from "../engine/tools.py?raw";
 
 interface WorkerRequest {
   requestId: number;
-  command: "chat" | "digest";
+  command: "chat" | "digest" | "stream-probe";
   root: unknown;
   question?: string;
   modelId: string;
@@ -18,10 +18,11 @@ interface WorkerRequest {
 }
 
 interface WorkerResponse {
-  type: "status" | "result" | "error";
+  type: "status" | "result" | "stream" | "error";
   requestId?: number;
   state?: "idle" | "loading" | "ready" | "failed";
   message?: string;
+  event?: unknown;
   result?: unknown;
 }
 
@@ -99,6 +100,10 @@ function getEngine(): Promise<PyodideAPI> {
 
 async function execute(request: WorkerRequest): Promise<unknown> {
   const pyodide = await getEngine();
+  if (request.command === "stream-probe") {
+    return executeStreamProbe(pyodide, request);
+  }
+
   const payload = JSON.stringify({
     command: request.command,
     root: request.root,
@@ -112,6 +117,50 @@ async function execute(request: WorkerRequest): Promise<unknown> {
     return JSON.parse(String(result));
   } finally {
     pyodide.runPython("request_payload = None");
+  }
+}
+
+// Temporary Phase 0 probe: remove after verifying that run_stream chunks cross
+// the Pyodide worker boundary as separate postMessage events.
+async function executeStreamProbe(pyodide: PyodideAPI, request: WorkerRequest): Promise<unknown> {
+  pyodide.globals.set("stream_probe_payload", JSON.stringify({ root: request.root }));
+  pyodide.globals.set("stream_probe_emit", (eventJson: string) => {
+    workerScope.postMessage({
+      type: "stream",
+      requestId: request.requestId,
+      event: JSON.parse(eventJson),
+    });
+  });
+
+  try {
+    const result = await pyodide.runPythonAsync(`
+import asyncio
+import json
+
+from pydantic_ai.models.test import TestModel
+
+from engine.agent import build_chat_agent
+from engine.document import DocumentNode
+from engine.tools import DocumentContext
+
+async def _run_stream_probe():
+    root = DocumentNode.model_validate(json.loads(stream_probe_payload)["root"])
+    context = DocumentContext(root=root, document_name=root.label)
+    agent = build_chat_agent(
+        TestModel(call_tools=[], custom_output_text="Probe streamed text.", model_name="phase-0-probe")
+    )
+    async with agent.run_stream("probe", deps=context) as response:
+        async for delta in response.stream_text(delta=True, debounce_by=None):
+            if delta:
+                stream_probe_emit(json.dumps({"kind": "text", "delta": delta}))
+                await asyncio.sleep(0.05)
+        return await response.get_output()
+
+await _run_stream_probe()
+`);
+    return String(result);
+  } finally {
+    pyodide.runPython("stream_probe_payload = None; stream_probe_emit = None");
   }
 }
 
