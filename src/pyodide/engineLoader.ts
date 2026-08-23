@@ -2,11 +2,13 @@ import type { DocumentNode } from "../parser";
 import {
   parseCaseDigestAgentResult,
   parseChatAgentResult,
+  parseStreamEvent,
   type AgentCredentials,
   type AgentRequest,
   type CaseDigestAgentResult,
   type ChatAgentResult,
   type EngineStatus,
+  type StreamEvent,
 } from "./types";
 
 interface WorkerStatusMessage {
@@ -21,17 +23,24 @@ interface WorkerResultMessage {
   result: unknown;
 }
 
+interface WorkerStreamMessage {
+  type: "stream";
+  requestId: number;
+  event: unknown;
+}
+
 interface WorkerErrorMessage {
   type: "error";
   requestId?: number;
   message: string;
 }
 
-type WorkerResponse = WorkerStatusMessage | WorkerResultMessage | WorkerErrorMessage;
+type WorkerResponse = WorkerStatusMessage | WorkerResultMessage | WorkerStreamMessage | WorkerErrorMessage;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  onStream?: (event: unknown) => void;
 }
 
 let worker: Worker | null = null;
@@ -61,6 +70,15 @@ function createWorker(): Worker {
 
     const pending = message.requestId === undefined ? undefined : pendingRequests.get(message.requestId);
     if (!pending) return;
+    if (message.type === "stream") {
+      try {
+        pending.onStream?.(message.event);
+      } catch (error) {
+        pendingRequests.delete(message.requestId);
+        pending.reject(error instanceof Error ? error : new Error("The streamed agent event was invalid."));
+      }
+      return;
+    }
     pendingRequests.delete(message.requestId!);
     if (message.type === "error") pending.reject(new Error(message.message));
     else pending.resolve(message.result);
@@ -75,13 +93,13 @@ function createWorker(): Worker {
   return nextWorker;
 }
 
-function requestAgent(request: AgentRequest): Promise<unknown> {
+function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void): Promise<unknown> {
   const activeWorker = worker ?? (worker = createWorker());
   const requestId = ++requestSequence;
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
+    pendingRequests.set(requestId, { resolve, reject, onStream });
     const { credentials, ...command } = request;
     activeWorker.postMessage({
       requestId,
@@ -108,6 +126,19 @@ export async function runChatAgent(
   credentials: AgentCredentials,
 ): Promise<ChatAgentResult> {
   return parseChatAgentResult(await requestAgent({ command: "chat", root, question, credentials }));
+}
+
+export async function runChatAgentStreaming(
+  root: DocumentNode,
+  question: string,
+  credentials: AgentCredentials,
+  onStream: (event: StreamEvent) => void,
+): Promise<ChatAgentResult> {
+  const result = await requestAgent(
+    { command: "chat", root, question, credentials, stream: true },
+    (event) => onStream(parseStreamEvent(event)),
+  );
+  return parseChatAgentResult(result);
 }
 
 export async function runCaseDigestAgent(

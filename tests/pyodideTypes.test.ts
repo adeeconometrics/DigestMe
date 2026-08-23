@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCaseDigestAgentResult, parseChatAgentResult } from "../src/pyodide/types";
+import { parseCaseDigestAgentResult, parseChatAgentResult, parseStreamEvent } from "../src/pyodide/types";
 import rawMockJson from "./fixtures/case-digest.mock.json";
 
 const reference = {
@@ -43,6 +43,43 @@ describe("Pyodide result contracts", () => {
 
     expect(result.digest.case_title).toBe("Villanueva v. Bayside Port Workers Cooperative");
     expect(result.elapsedMs).toBe(388000);
+  });
+
+  it("parses thinking and text stream deltas", () => {
+    expect(parseStreamEvent({ type: "thinking", delta: "Reviewing the record." })).toEqual({
+      type: "thinking",
+      delta: "Reviewing the record.",
+    });
+    expect(parseStreamEvent({ type: "text", delta: "The holding is clear." })).toEqual({
+      type: "text",
+      delta: "The holding is clear.",
+    });
+  });
+
+  it("parses the final stream event through the chat result contract", () => {
+    expect(parseStreamEvent({
+      type: "final",
+      result: {
+        markdown: "Final answer.",
+        references: [],
+        model: "deepseek/deepseek-v3",
+        elapsed_ms: 1200,
+      },
+    })).toEqual({
+      type: "final",
+      result: {
+        markdown: "Final answer.",
+        references: [],
+        model: "deepseek/deepseek-v3",
+        elapsedMs: 1200,
+      },
+    });
+  });
+
+  it("rejects unknown stream event types", () => {
+    expect(() => parseStreamEvent({ type: "tool", delta: "hidden" })).toThrow(
+      "Agent returned an invalid stream event.",
+    );
   });
 
   it("rejects malformed execution metadata", () => {

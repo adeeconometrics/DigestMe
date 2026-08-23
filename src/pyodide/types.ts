@@ -26,6 +26,23 @@ export interface ChatAgentResult extends AgentExecution {
   references: AgentReference[];
 }
 
+export interface StreamThinkingEvent {
+  type: "thinking";
+  delta: string;
+}
+
+export interface StreamTextEvent {
+  type: "text";
+  delta: string;
+}
+
+export interface StreamFinalEvent {
+  type: "final";
+  result: ChatAgentResult;
+}
+
+export type StreamEvent = StreamThinkingEvent | StreamTextEvent | StreamFinalEvent;
+
 export interface CaseDigestAgentResult extends AgentExecution {
   digest: CaseDigest;
   references: AgentReference[];
@@ -38,6 +55,7 @@ export interface AgentRequest {
   root: DocumentNode;
   credentials: AgentCredentials;
   question?: string;
+  stream?: boolean;
 }
 
 export interface EngineStatus {
@@ -107,6 +125,21 @@ export function parseChatAgentResult(value: unknown): ChatAgentResult {
     markdown: requiredString(result.markdown, "markdown answer"),
     references: parseReferences(result.references),
   };
+}
+
+export function parseStreamEvent(value: unknown): StreamEvent {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Agent returned an invalid stream event.");
+  }
+
+  const event = value as Record<string, unknown>;
+  if (event.type === "thinking" || event.type === "text") {
+    return { type: event.type, delta: requiredString(event.delta, "stream delta") };
+  }
+  if (event.type === "final") {
+    return { type: "final", result: parseChatAgentResult(event.result) };
+  }
+  throw new Error("Agent returned an invalid stream event.");
 }
 
 export function parseCaseDigestAgentResult(value: unknown): CaseDigestAgentResult {
