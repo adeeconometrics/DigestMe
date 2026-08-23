@@ -11,3 +11,4 @@ opencode.jsonc
 *.docx
 *.csv
 coverage/
+semgrep-results.sarif

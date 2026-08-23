@@ -27,7 +27,7 @@ Everything is client-side: `@firecrawl/pdf-inspector-wasm` converts a PDF to mar
 
 ## Deploy gotchas
 
-- **Every push to `main` deploys to production GitHub Pages** (`.github/workflows/ci.yml` runs lint/test/typecheck/build, then deploys on push to main). PRs only get the check jobs.
+- **Every push to `main` deploys to production GitHub Pages** (`.github/workflows/ci.yml` runs lint/test/typecheck + a Semgrep security scan over `p/owasp-top-ten`, `p/javascript`, `p/cwe-top-25`, `p/secrets`, `p/security-audit`, then builds and deploys on push to main). PRs only get the check jobs.
 - `vite.config.ts` sets `base: "/DigestMe/"` when `GITHUB_ACTIONS=true`, otherwise `/`. Reference assets via Vite imports/relative paths — hardcoded absolute URLs break on Pages.
 
 ## Layout
