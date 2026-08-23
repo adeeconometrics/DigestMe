@@ -75,7 +75,7 @@ export default function App() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [storageError, setStorageError] = useState("");
+  const [, setStorageError] = useState("");
   const [sessionHistory, setSessionHistory] = useState<StudySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [sessionStartedAt, setSessionStartedAt] = useState("");

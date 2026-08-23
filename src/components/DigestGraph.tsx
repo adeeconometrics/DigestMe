@@ -1,5 +1,5 @@
 import forceAtlas2 from "graphology-layout-forceatlas2";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sigma from "sigma";
 import type { DocumentNode } from "../parser";
 import {
@@ -191,7 +191,7 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
     });
   }, [graph, tree, selectedNodeId]);
 
-  function focusNode(nodeId: string): void {
+  const focusNode = useCallback((nodeId: string): void => {
     const renderer = sigmaRef.current;
     if (!renderer) return;
     const display = renderer.getNodeDisplayData(nodeId);
@@ -200,13 +200,13 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       { x: display.x, y: display.y, ratio: Math.max(renderer.getCamera().getState().ratio, 0.4) },
       { duration: 320 },
     );
-  }
+  }, []);
 
   // Chat-driven focus: pan to the node a reference card points at.
   useEffect(() => {
     if (!focusRequest) return;
     focusNode(focusRequest.nodeId);
-  }, [focusRequest]);
+  }, [focusRequest, focusNode]);
 
   const hoveredPayload = hovered ? graph.getNodeAttributes(hovered.id) : null;
 
