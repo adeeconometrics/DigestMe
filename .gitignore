@@ -10,3 +10,4 @@ opencode.jsonc
 *.pdf
 *.docx
 *.csv
+coverage/

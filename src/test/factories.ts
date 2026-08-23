@@ -77,7 +77,7 @@ export function buildBlock(
   label: string,
   overrides: Partial<DocumentNode> = {},
 ): DocumentNode {
-  return buildDocumentNode({ id, kind: "block", label, section: label, ...overrides });
+  return buildDocumentNode({ id, kind: "block", label, section: label, text: label, ...overrides });
 }
 
 export function buildSection(
