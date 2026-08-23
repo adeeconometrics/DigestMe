@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "digest-engine"
+version = "0.1.0"
+description = "A pyodide-friendly pydantic-ai harness for case digests."
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic-ai-slim>=2.33,<3",
+]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15,<2",
+  "pylint>=3.3,<4",
+  "pytest>=8.3,<9",
+]
+
+[tool.setuptools]
+packages = ["engine"]
+
+[tool.setuptools.package-dir]
+engine = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+files = ["__init__.py", "schemas.py", "document.py", "search.py", "tools.py", "agent.py", "tests"]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["^\\.venv/", "^\\.pytest_cache/"]
+
+[tool.pylint.main]
+py-version = "3.12"
+
+[tool.pylint.messages_control]
+disable = [
+  "duplicate-code",
+  "import-error",
+  "invalid-name",
+  "missing-function-docstring",
+  "missing-module-docstring",
+  "too-few-public-methods",
+]
+
+[tool.pylint.format]
+max-line-length = 120
