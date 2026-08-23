@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from time import perf_counter
+from collections.abc import Callable, Mapping
+from time import perf_counter, time_ns
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import (
+    PartDeltaEvent,
+    PartEndEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+    ToolCallEvent,
+    ToolCallPart,
+    ToolCallPartDelta,
+    ToolResultEvent,
+)
+from pydantic_ai.run import AgentRunResultEvent
 
 from .agent import build_chat_openrouter_agent, build_openrouter_agent
 from .document import DocumentNode
@@ -16,6 +30,7 @@ from .tools import DocumentContext
 
 
 DIGEST_PROMPT = "Create a complete case digest from the supplied source document."
+StreamEmitter = Callable[[str], object]
 
 
 def _context(root: DocumentNode | Mapping[str, object]) -> DocumentContext:
@@ -27,6 +42,112 @@ def _context(root: DocumentNode | Mapping[str, object]) -> DocumentContext:
 def _elapsed_ms(started_at: float) -> int:
     """Return a non-negative integer duration suitable for UI metadata."""
     return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _epoch_ms() -> int:
+    """Return the current wall-clock time for cross-runtime execution metadata."""
+    return time_ns() // 1_000_000
+
+
+def _emit_stream_event(emit: StreamEmitter, event: Mapping[str, object]) -> None:
+    """Serialize one stream event before crossing the Pyodide/JavaScript boundary."""
+    emit(json.dumps(event, separators=(",", ":"), ensure_ascii=True, default=str))
+
+
+def _tool_content(content: object) -> str:
+    """Make a tool result safe and readable in the browser activity log."""
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    return json.dumps(content, ensure_ascii=True, default=str)
+
+
+def _part_kind(part: object) -> str | None:
+    """Map supported Pydantic AI response parts to the browser stream vocabulary."""
+    if isinstance(part, TextPart):
+        return "text"
+    if isinstance(part, ThinkingPart):
+        return "thinking"
+    if isinstance(part, ToolCallPart):
+        return "tool-call"
+    return None
+
+
+def _emit_agent_event(emit: StreamEmitter, event: object) -> None:  # pylint: disable=too-many-return-statements,too-many-branches
+    """Translate Pydantic AI lifecycle events into a small browser-facing protocol."""
+    if isinstance(event, PartStartEvent):
+        kind = _part_kind(event.part)
+        if kind is None:
+            return
+        payload: dict[str, object] = {"type": "part-start", "index": event.index, "kind": kind}
+        if isinstance(event.part, (TextPart, ThinkingPart)):
+            payload["content"] = event.part.content
+        elif isinstance(event.part, ToolCallPart):
+            payload["tool_call_id"] = event.part.tool_call_id
+            payload["tool_name"] = event.part.tool_name
+            if event.part.args is not None:
+                payload["args"] = event.part.args
+        _emit_stream_event(emit, payload)
+        return
+
+    if isinstance(event, PartDeltaEvent):
+        delta_payload: dict[str, object] = {"type": "part-delta", "index": event.index}
+        if isinstance(event.delta, TextPartDelta):
+            delta_payload["kind"] = "text"
+            delta_payload["content_delta"] = event.delta.content_delta
+        elif isinstance(event.delta, ThinkingPartDelta):
+            delta_payload["kind"] = "thinking"
+            if event.delta.content_delta is None:
+                return
+            delta_payload["content_delta"] = event.delta.content_delta
+        elif isinstance(event.delta, ToolCallPartDelta):
+            delta_payload["kind"] = "tool-call"
+            if event.delta.args_delta is not None:
+                delta_payload["args_delta"] = event.delta.args_delta
+            if event.delta.tool_name_delta is not None:
+                delta_payload["tool_name_delta"] = event.delta.tool_name_delta
+            if event.delta.tool_call_id is not None:
+                delta_payload["tool_call_id"] = event.delta.tool_call_id
+            if len(delta_payload) == 3:
+                return
+        else:
+            return
+        _emit_stream_event(emit, delta_payload)
+        return
+
+    if isinstance(event, PartEndEvent):
+        kind = _part_kind(event.part)
+        if kind is None:
+            return
+        payload = {"type": "part-end", "index": event.index, "kind": kind}
+        if isinstance(event.part, ToolCallPart) and event.part.args is not None:
+            payload["args"] = event.part.args
+        _emit_stream_event(emit, payload)
+        return
+
+    if isinstance(event, ToolCallEvent):
+        _emit_stream_event(
+            emit,
+            {
+                "type": "tool-call",
+                "tool_call_id": event.part.tool_call_id,
+                "tool_name": event.part.tool_name,
+                "args": event.part.args,
+            },
+        )
+        return
+
+    if isinstance(event, ToolResultEvent):
+        _emit_stream_event(
+            emit,
+            {
+                "type": "tool-result",
+                "tool_call_id": event.tool_call_id,
+                "content": _tool_content(event.part.content),
+                "is_error": event.part.part_kind == "retry-prompt",
+            },
+        )
 
 
 async def run_case_digest(
@@ -58,6 +179,7 @@ async def run_chat(
     agent: Agent[DocumentContext, str] | None = None,
 ) -> ChatAnswer:
     """Run the markdown chat agent and retain its source references."""
+    started_at_ms = _epoch_ms()
     normalized_question = question.strip()
     if not normalized_question:
         raise ValueError("Question must not be empty")
@@ -69,11 +191,58 @@ async def run_chat(
     markdown = result.output.strip()
     if not markdown:
         raise ValueError("The agent returned an empty answer")
+    ended_at_ms = _epoch_ms()
     return ChatAnswer(
         markdown=markdown,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=_elapsed_ms(started_at),
+        elapsed_ms=max(_elapsed_ms(started_at), ended_at_ms - started_at_ms),
+        started_at=started_at_ms,
+        ended_at=ended_at_ms,
+    )
+
+
+async def run_chat_stream(  # pylint: disable=too-many-arguments
+    root: DocumentNode | Mapping[str, object],
+    question: str,
+    *,
+    api_key: str,
+    model_name: str,
+    emit: StreamEmitter,
+    agent: Agent[DocumentContext, str] | None = None,
+) -> ChatAnswer:
+    """Run the chat agent while emitting model, thinking, and tool-call deltas."""
+    normalized_question = question.strip()
+    if not normalized_question:
+        raise ValueError("Question must not be empty")
+
+    started_at = perf_counter()
+    started_at_ms = _epoch_ms()
+    context = _context(root)
+    runner = agent or build_chat_openrouter_agent(api_key=api_key, model_name=model_name)
+    _emit_stream_event(emit, {"type": "start", "model": model_name, "started_at": started_at_ms})
+
+    markdown: str | None = None
+    async with runner.run_stream_events(normalized_question, deps=context) as events:
+        async for event in events:
+            if isinstance(event, AgentRunResultEvent):
+                if not isinstance(event.result.output, str):
+                    raise TypeError("The chat agent returned a non-text answer")
+                markdown = event.result.output.strip()
+            else:
+                _emit_agent_event(emit, event)
+
+    if not markdown:
+        raise ValueError("The agent returned an empty answer")
+
+    ended_at = _epoch_ms()
+    return ChatAnswer(
+        markdown=markdown,
+        references=context.to_references(),
+        model=model_name,
+        elapsed_ms=max(_elapsed_ms(started_at), ended_at - started_at_ms),
+        started_at=started_at_ms,
+        ended_at=ended_at,
     )
 
 
@@ -118,3 +287,23 @@ async def run_request(payload: str) -> str:
         return result.model_dump_json()
 
     raise ValueError(f"Unknown command: {command}")
+
+
+async def run_request_stream(payload: str, emit: StreamEmitter) -> str:
+    """Dispatch a chat request and emit JSON events as the agent executes."""
+    request: Any = json.loads(payload)
+    if not isinstance(request, Mapping):
+        raise ValueError("Request must be a JSON object")
+
+    command = _required_string(request, "command")
+    if command != "chat":
+        raise ValueError("Streaming is only supported for chat requests")
+
+    result = await run_chat_stream(
+        _required_root(request),
+        _required_string(request, "question"),
+        api_key=_required_string(request, "api_key"),
+        model_name=_required_string(request, "model_name"),
+        emit=emit,
+    )
+    return result.model_dump_json()
