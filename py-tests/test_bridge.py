@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from typing import Any, cast
 
@@ -12,7 +13,7 @@ from pydantic_ai.messages import PartDeltaEvent, PartStartEvent, ThinkingPart, T
 from pydantic_ai.models.test import TestModel
 
 from engine.agent import build_agent, build_chat_agent
-from engine.bridge import ChatStreamEvent, run_case_digest, run_chat, run_chat_stream
+from engine.bridge import ChatStreamEvent, _run_chat_stream_request, run_case_digest, run_chat, run_chat_stream
 from engine.document import DocumentNode
 from engine.tools import DocumentContext
 
@@ -123,6 +124,29 @@ def test_run_chat_stream_uses_test_model_stream(document_tree: DocumentNode) -> 
     ]
     assert events[-1]["type"] == "final"
     assert events[-1]["answer"].model == "test/chat"
+
+
+def test_stream_request_serializes_events_for_the_worker(
+    document_tree: DocumentNode,
+) -> None:
+    emitted: list[str] = []
+    answer = asyncio.run(
+        _run_chat_stream_request(
+            document_tree,
+            "What happened?",
+            api_key="unused-in-test",
+            model_name="test/chat",
+            stream_callback=emitted.append,
+            agent=build_chat_agent(
+                TestModel(call_tools=[], custom_output_text="Streamed answer.", model_name="test-stream")
+            ),
+        )
+    )
+
+    events = [json.loads(payload) for payload in emitted]
+    assert [event["type"] for event in events] == ["text", "text", "final"]
+    assert events[-1]["result"]["markdown"] == "Streamed answer."
+    assert answer.markdown == "Streamed answer."
 
 
 async def _collect_chat_stream(

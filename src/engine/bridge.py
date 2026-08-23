@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterable, AsyncIterator, Mapping
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping
 from time import perf_counter
 from typing import Any, Literal, TypedDict
 
@@ -177,6 +177,46 @@ async def run_chat_stream(
             pass
 
 
+def _stream_event_json(event: ChatStreamEvent) -> str:
+    """Serialize one stream event for the JavaScript callback boundary."""
+    if event["type"] == "final":
+        return json.dumps({"type": "final", "result": event["answer"].model_dump(mode="json")})
+    return json.dumps(event)
+
+
+# The optional injected agent keeps the bridge helper deterministic in offline tests.
+# pylint: disable=too-many-arguments
+async def _run_chat_stream_request(
+    root: DocumentNode | Mapping[str, object],
+    question: str,
+    *,
+    api_key: str,
+    model_name: str,
+    stream_callback: Callable[[str], Any] | None,
+    agent: Agent[DocumentContext, str] | None = None,
+) -> ChatAnswer:
+    """Consume a chat stream, forwarding events and retaining its final answer."""
+    final_answer: ChatAnswer | None = None
+    async for event in run_chat_stream(
+        root,
+        question,
+        api_key=api_key,
+        model_name=model_name,
+        agent=agent,
+    ):
+        if stream_callback is not None:
+            stream_callback(_stream_event_json(event))
+        if event["type"] == "final":
+            final_answer = event["answer"]
+
+    if final_answer is None:
+        raise RuntimeError("The chat stream ended without a final answer")
+    return final_answer
+
+
+# pylint: enable=too-many-arguments
+
+
 def _required_string(request: Mapping[str, object], key: str) -> str:
     """Read a required string from a JSON request."""
     value = request.get(key)
@@ -193,7 +233,7 @@ def _required_root(request: Mapping[str, object]) -> Mapping[str, object]:
     return value
 
 
-async def run_request(payload: str) -> str:
+async def run_request(payload: str, stream_callback: Callable[[str], Any] | None = None) -> str:
     """Dispatch one JSON request and return JSON for safe JS/Python boundary crossing."""
     request: Any = json.loads(payload)
     if not isinstance(request, Mapping):
@@ -203,12 +243,25 @@ async def run_request(payload: str) -> str:
     root = _required_root(request)
     api_key = _required_string(request, "api_key")
     model_name = _required_string(request, "model_name")
+    stream = request.get("stream", False)
+    if not isinstance(stream, bool):
+        raise ValueError("stream must be a boolean")
 
     if command == "digest":
         return (
             await run_case_digest(root, api_key=api_key, model_name=model_name)
         ).model_dump_json()
     if command == "chat":
+        if stream:
+            return (
+                await _run_chat_stream_request(
+                    root,
+                    _required_string(request, "question"),
+                    api_key=api_key,
+                    model_name=model_name,
+                    stream_callback=stream_callback,
+                )
+            ).model_dump_json()
         result = await run_chat(
             root,
             _required_string(request, "question"),
