@@ -24,6 +24,19 @@ class DocumentNode(BaseModel):
     children: list[DocumentNode] = Field(default_factory=list)
 
 
+class DocumentReference(BaseModel):
+    """A source node reference that can be highlighted by the browser UI."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    node_id: str
+    kind: DocumentNodeKind
+    label: str
+    section: str
+    page: int | None
+    snippet: str
+
+
 class NavigationEntry(BaseModel):
     """One child exposed by document navigation with its source reference."""
 
@@ -61,6 +74,21 @@ def flatten_tree(root: DocumentNode) -> list[DocumentNode]:
 
     visit(root)
     return nodes
+
+
+def reference_for_node(node: DocumentNode) -> DocumentReference:
+    """Convert a tree node into the compact source reference sent to the UI."""
+    source = (node.text or node.label).strip()
+    if len(source) > 180:
+        source = f"{source[:177]}..."
+    return DocumentReference(
+        node_id=node.id,
+        kind=node.kind,
+        label=node.label,
+        section=node.section,
+        page=node.page,
+        snippet=source,
+    )
 
 
 def find_section(root: DocumentNode, section_path: str) -> DocumentNode | None:
