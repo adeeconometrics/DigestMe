@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@firecrawl/pdf-inspector-wasm": "^1.17.0",
+    "assistant-stream": "^0.3.39",
     "docx": "^9.7.1",
     "dompurify": "^3.4.14",
     "graphology": "^0.26.0",
