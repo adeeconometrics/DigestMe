@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { retrieveNodes } from "./retrieval";
-import { buildBlock, buildDocumentNode, buildSection } from "../test/factories";
+import { retrieveNodes } from "../src/chat/retrieval";
+import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
 function sampleTree() {
   return buildDocumentNode({

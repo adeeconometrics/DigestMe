@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 async function loadParser() {
-  return import("./pdfParser");
+  return import("../src/parser/pdfParser");
 }
 
 function pdfFile(): File {
@@ -45,7 +45,7 @@ describe("ensureParserReady", () => {
   it("wraps parser startup failures in a PdfParseError and recovers on retry", async () => {
     mocks.init.mockRejectedValueOnce(new Error("wasm boom"));
     const { ensureParserReady } = await loadParser();
-    const { PdfParseError } = await import("./types");
+    const { PdfParseError } = await import("../src/parser/types");
 
     const firstAttempt = ensureParserReady();
     await expect(firstAttempt).rejects.toBeInstanceOf(PdfParseError);
@@ -123,7 +123,9 @@ describe("parsePdf", () => {
     const { parsePdf } = await loadParser();
 
     await expect(parsePdf(pdfFile())).rejects.toThrow("extraction exploded");
-    await expect(parsePdf(pdfFile())).rejects.toBeInstanceOf((await import("./types")).PdfParseError);
+    await expect(parsePdf(pdfFile())).rejects.toBeInstanceOf(
+      (await import("../src/parser/types")).PdfParseError,
+    );
   });
 
   it("honors the compact profile option", async () => {

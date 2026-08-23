@@ -14,8 +14,8 @@ import {
   removeDeck,
   removeDocument,
   removeSessionsForDeck,
-} from "./db";
-import { STARTER_DECK } from "../data/starter";
+} from "../src/lib/db";
+import { STARTER_DECK } from "../src/data/starter";
 import {
   buildBlock,
   buildDeck,
@@ -23,7 +23,7 @@ import {
   buildParsedDocument,
   buildSection,
   buildSession,
-} from "../test/factories";
+} from "./factories";
 
 /**
  * fake-indexeddb (test/setup.ts) backs window.indexedDB, so the real db.ts runs

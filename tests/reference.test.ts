@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import type { PageTextIndex, ReferenceBox } from "./reference";
-import { indexDocumentPage, indexPageText, locateReference } from "./reference";
-import { buildBlock } from "../test/factories";
+import type { PageTextIndex, ReferenceBox } from "../src/pdf/reference";
+import { indexDocumentPage, indexPageText, locateReference } from "../src/pdf/reference";
+import { buildBlock } from "./factories";
 
 function mockPage(
   items: Array<{ str: string; transform: number[]; width: number }>,

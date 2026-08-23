@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deckNameFromFile, validateCsv } from "./csv";
+import { deckNameFromFile, validateCsv } from "../src/lib/csv";
 
 const VALID_CSV = ["Question,Answer", "What is X?,X is Y", "Q2,A2"].join("\n");
 

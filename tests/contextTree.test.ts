@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildContextTree, flattenTree } from "./contextTree";
-import { buildBlock, buildDocumentNode, buildSection } from "../test/factories";
+import { buildContextTree, flattenTree } from "../src/parser/contextTree";
+import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
 function digestOf(markdown: string, title = "Document") {
   return buildContextTree(markdown, title);

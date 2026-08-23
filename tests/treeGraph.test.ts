@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import Graph from "graphology";
-import { NODE_COLORS, pathToNode, treeToGraph } from "./treeGraph";
-import { buildBlock, buildDocumentNode, buildSection } from "../test/factories";
+import { NODE_COLORS, pathToNode, treeToGraph } from "../src/graph/treeGraph";
+import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
 function sampleTree() {
   return buildDocumentNode({

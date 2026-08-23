@@ -3,9 +3,9 @@ import type {
   CaseDigestFacts,
   CaseDigestIssue,
   CaseDigestIssueInput,
-} from "../lib/caseDigestDocx";
-import type { DocumentNode, ParseMetrics, ParsedDocument } from "../parser";
-import type { Deck, Flashcard, StudySession } from "../types";
+} from "../src/lib/caseDigestDocx";
+import type { DocumentNode, ParseMetrics, ParsedDocument } from "../src/parser";
+import type { Deck, Flashcard, StudySession } from "../src/types";
 
 /**
  * Shared test builders. Prefer `buildX({ field: value })` over full literals

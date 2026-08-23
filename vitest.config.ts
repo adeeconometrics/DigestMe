@@ -3,8 +3,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    setupFiles: ["./test/setup.ts"],
-    include: ["src/**/*.test.ts"],
+    setupFiles: ["./tests/setup.ts"],
+    include: ["tests/**/*.test.ts"],
     passWithNoTests: true,
     coverage: {
       provider: "v8",
@@ -16,11 +16,7 @@ export default defineConfig({
         "src/graph/treeGraph.ts",
         "src/pdf/reference.ts",
       ],
-      exclude: [
-        "**/*.test.ts",
-        "src/test/**",
-        "src/parser/types.ts",
-      ],
+      exclude: ["tests/**", "src/parser/types.ts"],
     },
   },
 });
