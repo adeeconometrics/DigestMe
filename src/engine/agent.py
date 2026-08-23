@@ -1,9 +1,10 @@
 """Pydantic AI case-digest agent definition."""
 
 import sys
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from typing import cast
 
-from httpx2 import AsyncClient, Request, Response
+from httpx2 import AsyncByteStream, AsyncClient, Request, Response
 from httpx2._transports import AsyncHTTPTransport
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
@@ -67,23 +68,55 @@ def _browser_safe_headers(headers: Iterable[tuple[str, str]]) -> list[tuple[str,
     return [(name, value) for name, value in headers if not name.lower().startswith("x-stainless-")]
 
 
+class _BytesStreamAdapter(AsyncByteStream):
+    """Adapt a transport byte stream so every yielded chunk is real ``bytes``.
+
+    The jsfetch transport used in the browser reads ``ReadableStream`` chunks as
+    ``memoryview`` objects. Decoders that assume ``bytes`` then break — the openai
+    SSE parser calls ``chunk.splitlines()``, which memoryview lacks. The adapter
+    passes already-bytes chunks through untouched.
+    """
+
+    def __init__(self, stream: AsyncByteStream) -> None:
+        self._stream = stream
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._stream:
+            yield chunk if isinstance(chunk, bytes) else bytes(chunk)
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+def _browser_safe_response(response: Response) -> Response:
+    """Normalize a browser transport response so all byte paths stay real bytes.
+
+    ``AsyncByteStream`` is not a runtime-checkable protocol, so the stream is
+    detected by duck typing instead of ``isinstance``.
+    """
+    if hasattr(response.stream, "__aiter__"):
+        response.stream = _BytesStreamAdapter(cast(AsyncByteStream, response.stream))
+    return response
+
+
+class _BrowserSafeTransport(AsyncHTTPTransport):
+    """Async transport that strips CORS-unsafe telemetry headers."""
+
+    async def handle_async_request(self, request: Request) -> Response:
+        safe_request = Request(
+            method=request.method,
+            url=request.url,
+            headers=_browser_safe_headers(request.headers.items()),
+            stream=request.stream,
+            extensions=request.extensions,
+        )
+        return _browser_safe_response(await super().handle_async_request(safe_request))
+
+
 def _openrouter_provider(*, api_key: str) -> OpenRouterProvider:
     """Create the OpenRouter provider, shimming the transport in the browser."""
     if sys.platform != "emscripten":
         return OpenRouterProvider(api_key=api_key)
-
-    class _BrowserSafeTransport(AsyncHTTPTransport):
-        """Async transport that strips CORS-unsafe telemetry headers."""
-
-        async def handle_async_request(self, request: Request) -> Response:
-            safe_request = Request(
-                method=request.method,
-                url=request.url,
-                headers=_browser_safe_headers(request.headers.items()),
-                stream=request.stream,
-                extensions=request.extensions,
-            )
-            return await super().handle_async_request(safe_request)
 
     return OpenRouterProvider(api_key=api_key, http_client=AsyncClient(transport=_BrowserSafeTransport()))
 

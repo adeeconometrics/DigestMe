@@ -1,10 +1,16 @@
 """Tests for provider-specific agent construction."""
 
+import asyncio
+from collections.abc import AsyncIterator
+from typing import cast
+
 import pytest
+from httpx2 import AsyncByteStream, Response
+from openai._streaming import SSEDecoder, ServerSentEvent
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from engine.agent import _browser_safe_headers, build_openrouter_agent
+from engine.agent import _browser_safe_headers, _browser_safe_response, build_openrouter_agent
 
 
 def test_build_openrouter_agent_uses_explicit_model_and_key() -> None:
@@ -48,3 +54,33 @@ def test_browser_safe_headers_preserves_plain_headers() -> None:
     headers = [("Accept", "application/json"), ("traceparent", "00-0af7-1-01")]
 
     assert _browser_safe_headers(headers) == headers
+
+
+class _MemoryViewStream:
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield cast(bytes, memoryview(b"data: {\"choices\": [{\"index\": 0} ]}\n"))
+        yield b"\n"
+        yield cast(bytes, bytearray(b"data: [DONE]\n"))
+        yield b"\n"
+
+    async def aclose(self) -> None:
+        return None
+
+
+def test_browser_safe_response_normalizes_stream_chunks_for_sse_decoder() -> None:
+    response = Response(
+        200,
+        headers={"Content-Type": "text/event-stream"},
+        stream=cast(AsyncByteStream, _MemoryViewStream()),
+    )
+
+    safe_response = _browser_safe_response(response)
+
+    async def collect() -> list[ServerSentEvent]:
+        return [event async for event in SSEDecoder().aiter_bytes(safe_response.aiter_bytes())]
+
+    events = asyncio.run(collect())
+    assert [event.data for event in events] == [
+        '{"choices": [{"index": 0} ]}',
+        "[DONE]",
+    ]
