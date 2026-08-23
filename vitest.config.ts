@@ -12,6 +12,7 @@ export default defineConfig({
         "src/lib/**/*.ts",
         "src/parser/contextTree.ts",
         "src/parser/pdfParser.ts",
+        "src/chat/agentChat.ts",
         "src/chat/retrieval.ts",
         "src/graph/treeGraph.ts",
         "src/pdf/reference.ts",
