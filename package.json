@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "dump:case-digest": "node --experimental-strip-types dump/generate-case-digest.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@firecrawl/pdf-inspector-wasm": "^1.17.0",
+    "docx": "^9.7.1",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "pdfjs-dist": "^6.2.108",

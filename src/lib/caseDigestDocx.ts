@@ -2,6 +2,7 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  ExternalHyperlink,
   Footer,
   Header,
   HeightRule,
@@ -238,6 +239,11 @@ function textRun(text: string, style: TextStyle = {}): TextRun {
   });
 }
 
+/** Word merges adjacent tables, so every section table needs a spacer paragraph. */
+function tableSpacer(): Paragraph {
+  return new Paragraph({ children: [] });
+}
+
 function paragraph(children: readonly ParagraphChild[], options: IParagraphOptions = {}): Paragraph {
   return new Paragraph({
     spacing: BODY_SPACING,
@@ -364,8 +370,30 @@ function labelledCell(label: string, fill = LABEL_FILL): TableCell {
   ], { fill, margins: DETAILS_CELL_MARGINS });
 }
 
-function detailsValueCell(value: string): TableCell {
-  const paragraphs = contentParagraphs(value);
+function detailsValueCell(value: string, style: TextStyle = {}): TableCell {
+  const paragraphs = contentParagraphs(value, style);
+  return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
+}
+
+function isUrl(value: string): boolean {
+  return /^https?:\/\/\S+$/i.test(value.trim());
+}
+
+/** Full-text entries render as live links when the JSON carries a URL. */
+function fullTextCell(value: string): TableCell {
+  const trimmed = value.trim();
+  const paragraphs = isUrl(trimmed)
+    ? [paragraph([new ExternalHyperlink({
+        link: trimmed,
+        children: [new TextRun({
+          text: trimmed,
+          font: BODY_FONT,
+          size: BODY_SIZE,
+          color: "1155cc",
+          underline: {},
+        })],
+      })])]
+    : contentParagraphs(value);
   return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
 }
 
@@ -382,7 +410,7 @@ function detailsTable(caseDigest: CaseDigest): Table {
       labelledCell("Petitioner"),
       detailsValueCell(caseDigest.petitioner),
       labelledCell("Ponente"),
-      detailsValueCell(caseDigest.ponente),
+      detailsValueCell(caseDigest.ponente, { italics: true }),
     ], 345),
     row([
       labelledCell("Respondent"),
@@ -394,7 +422,7 @@ function detailsTable(caseDigest: CaseDigest): Table {
       labelledCell("Topic & Subtopic"),
       detailsValueCell(caseDigest.topic_subtopic),
       labelledCell("Full Text"),
-      detailsValueCell(caseDigest.full_text),
+      fullTextCell(caseDigest.full_text),
     ], 315),
   ], DETAILS_COLUMN_WIDTHS, DETAILS_TABLE_WIDTH);
 }
@@ -526,7 +554,7 @@ function classNotesTable(caseDigest: CaseDigest): Table {
 }
 
 function renderBody(caseDigest: CaseDigest): FileChild[] {
-  return [
+  const sections: Table[] = [
     detailsTable(caseDigest),
     summaryDoctrineTable(caseDigest),
     provisionsTable(caseDigest),
@@ -537,6 +565,10 @@ function renderBody(caseDigest: CaseDigest): FileChild[] {
     supremeCourtRulingTable(caseDigest),
     classNotesTable(caseDigest),
   ];
+
+  return sections.flatMap((section, index) => (
+    index === 0 ? [section] : [tableSpacer(), section]
+  ));
 }
 
 function headerFooterParagraph(text: string): Paragraph {
