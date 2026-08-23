@@ -44,7 +44,9 @@ export interface CsvValidationResult {
 }
 
 export type Rating = "again" | "hard" | "known";
-export type AppView = "study" | "library" | "digest";
+export type AppView = "study" | "library" | "digest" | "settings";
+
+export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
 /** Lightweight listing entry derived from a stored ParsedDocument. */
 export interface DocumentSummary {

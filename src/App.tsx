@@ -7,16 +7,19 @@ import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSes
 import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
 
 const DigestPage = lazy(() => import("./pages/DigestPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
 const VIEW_ROUTES: Record<AppView, string> = {
   study: "#/study",
   library: "#/library",
   digest: "#/digest",
+  settings: "#/settings",
 };
 
 function viewFromHash(hash: string): AppView {
   if (hash === "#/library") return "library";
   if (hash === "#/digest") return "digest";
+  if (hash === "#/settings") return "settings";
   return "study";
 }
 
@@ -135,6 +138,12 @@ export default function App() {
   function beginDigestSession(): void {
     setView("digest");
     setSessionToken((token) => token + 1);
+  }
+
+  function openSettings(): void {
+    setView("settings");
+    setOpenPanel(null);
+    setMobileMenuOpen(false);
   }
 
   const activeDeck = decks.find((deck) => deck.id === activeDeckId);
@@ -437,6 +446,7 @@ export default function App() {
         onImport={openImporter}
         onNewSession={beginDigestSession}
         onOpenSession={openSession}
+        onOpenSettings={openSettings}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
         onToggleCollapse={toggleRail}
@@ -466,6 +476,7 @@ export default function App() {
               activeDeckId={activeDeckId}
               decks={decks}
               onImport={openImporter}
+              onOpenSettings={openSettings}
               onSelectDeck={selectDeck}
               onSetView={(nextView) => {
                 setView(nextView);
@@ -476,7 +487,17 @@ export default function App() {
           )}
         </header>
 
-        {view === "study" ? (
+        {view === "settings" ? (
+          <Suspense fallback={<div className="loading-workspace"><span className="loading-orbit"><Icon name="lock" size={20} /></span><strong>Opening your study settings...</strong><small>Keeping credentials local to this tab</small></div>}>
+            {isLoading ? (
+              <div className="loading-workspace"><span className="loading-orbit"><Icon name="lock" size={20} /></span><strong>Opening your study settings...</strong><small>Keeping credentials local to this tab</small></div>
+            ) : (
+              <SettingsPage
+                onBackToStudy={() => setView("study")}
+              />
+            )}
+          </Suspense>
+        ) : view === "study" ? (
           <StudyDesk
             activeDeck={activeDeck}
             currentCard={currentCard}
@@ -556,6 +577,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   onTogglePanel: (panel: "sessions" | "decks") => void;
   onOpenSession: (sessionId: string) => void;
+  onOpenSettings: () => void;
   onNewSession: () => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
@@ -570,6 +592,7 @@ function Sidebar({
   onImport,
   onNewSession,
   onOpenSession,
+  onOpenSettings,
   onSelectDeck,
   onSetView,
   onToggleCollapse,
@@ -680,10 +703,10 @@ function Sidebar({
       </button>
 
       <div className="sidebar-bottom">
-        <div className="profile-row">
+        <button aria-current={view === "settings" ? "page" : undefined} className={`profile-row profile-button ${view === "settings" ? "active" : ""}`} onClick={onOpenSettings} title={collapsed ? "Open study settings" : undefined} type="button">
           <span className="avatar small">DS</span>
           <span className="profile-copy"><strong>My study space</strong><small>Personal workspace</small></span>
-        </div>
+        </button>
       </div>
     </aside>
   );
@@ -696,9 +719,10 @@ interface MobileMenuProps {
   onSetView: (view: AppView) => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
+  onOpenSettings: () => void;
 }
 
-function MobileMenu({ activeDeckId, decks, onImport, onSelectDeck, onSetView, view }: MobileMenuProps) {
+function MobileMenu({ activeDeckId, decks, onImport, onOpenSettings, onSelectDeck, onSetView, view }: MobileMenuProps) {
   return (
     <div className="mobile-menu-panel">
       <div className="mobile-nav-links">
@@ -713,6 +737,7 @@ function MobileMenu({ activeDeckId, decks, onImport, onSelectDeck, onSetView, vi
         </button>
       ))}
       <button className="mobile-import-button" onClick={onImport} type="button"><Icon name="upload" size={16} /> Import a CSV</button>
+      <button className={`mobile-settings-button ${view === "settings" ? "active" : ""}`} onClick={onOpenSettings} type="button"><Icon name="lock" size={16} /> My study space</button>
     </div>
   );
 }
