@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .document import DocumentReference
+
 
 class CaseDigestFacts(BaseModel):
     """Facts grouped according to the case-digest FACTS section."""
@@ -190,3 +192,25 @@ class CaseDigest(BaseModel):
             else:
                 normalized.append(issue)
         return normalized
+
+
+class ChatAnswer(BaseModel):
+    """Markdown answer plus references collected from the document tools."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    markdown: str
+    references: list[DocumentReference] = Field(default_factory=list)
+    model: str
+    elapsed_ms: int = Field(ge=0)
+
+
+class CaseDigestResult(BaseModel):
+    """Structured digest output plus the source nodes used to produce it."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    digest: CaseDigest
+    references: list[DocumentReference] = Field(default_factory=list)
+    model: str
+    elapsed_ms: int = Field(ge=0)
