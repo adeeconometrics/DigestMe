@@ -2973,6 +2973,55 @@ input:focus-visible,
   text-underline-offset: 2px;
 }
 
+/* Streaming markdown (markstream-react) inherits the chat's compact typography. */
+.markdown-body .markstream-react {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.markdown-fallback {
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+
+.thinking-details {
+  margin: 0 0 10px;
+  overflow: hidden;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--paper-deep);
+}
+
+.thinking-details summary {
+  padding: 7px 11px;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.thinking-details summary:hover {
+  color: var(--ink-soft);
+}
+
+.thinking-details[open] summary {
+  border-bottom: 1px dashed var(--line);
+}
+
+.thinking-body {
+  max-height: 220px;
+  padding: 9px 12px 11px;
+  overflow-y: auto;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .agent-references {
   margin-top: 12px;
 }

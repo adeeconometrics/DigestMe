@@ -1,7 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
 import { getDocumentWithSource, putDocumentWithFile } from "../lib/db";
@@ -15,10 +13,16 @@ import type { DocumentNode, ParsedDocument } from "../parser";
 import { referencesForAnswer, executionDescription, formatExecutionTime, mapAgentReferences } from "../chat/agentChat";
 import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
-import { runCaseDigestAgent, runChatAgent } from "../pyodide/engineLoader";
+import { runCaseDigestAgent, runChatAgentStreaming } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
+
+// Streaming-optimized markdown (with Mermaid) is heavy, so it loads only when
+// the first rendered answer appears instead of inflating the initial bundle.
+const StreamingMarkdown = lazy(() =>
+  import("markstream-react").then((module) => ({ default: module.default })),
+);
 
 type DigestStatus = "idle" | "parsing" | "error";
 type AgentStatus = "idle" | "running";
@@ -50,6 +54,12 @@ type ChatMessage =
       markdown: string;
       refs: RetrievalHit[];
       execution: AgentExecution;
+    })
+  | (ChatMessageBase & {
+      role: "assistant";
+      kind: "agent-stream";
+      markdown: string;
+      thinking: string | null;
     })
   | (ChatMessageBase & {
       role: "assistant";
@@ -93,6 +103,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   const logRef = useRef<HTMLDivElement>(null);
   const agentRequestRef = useRef(0);
   const docxUrlsRef = useRef<Set<string>>(new Set());
+  const streamFlushFrameRef = useRef<number | null>(null);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -103,14 +114,18 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     setMessages((previous) => [...previous, message]);
   }, []);
 
-  // Keep the newest message in view as the thread grows.
+  // Keep the newest message in view as the thread grows, unless the user has
+  // scrolled up to read an earlier answer (streaming keeps the log moving).
   useEffect(() => {
     const log = logRef.current;
-    if (log) log.scrollTop = log.scrollHeight;
+    if (!log) return;
+    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
+    if (nearBottom) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
   useEffect(() => () => {
     for (const url of docxUrlsRef.current) URL.revokeObjectURL(url);
+    if (streamFlushFrameRef.current !== null) cancelAnimationFrame(streamFlushFrameRef.current);
   }, []);
 
   // Sidebar "New session": clear the thread and selection.
@@ -294,20 +309,72 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     }
 
     setAgentStatus("running");
+    const messageId = makeMessageId();
+    let streamMarkdown = "";
+    let streamThinking = "";
+    let streamSettled = false;
+
+    const flushStream = (): void => {
+      streamFlushFrameRef.current = null;
+      if (streamSettled) return;
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === messageId && message.kind === "agent-stream"
+            ? { ...message, markdown: streamMarkdown, thinking: streamThinking || null }
+            : message,
+        ),
+      );
+    };
+
+    const scheduleStreamFlush = (): void => {
+      if (streamFlushFrameRef.current !== null || streamSettled) return;
+      streamFlushFrameRef.current = requestAnimationFrame(flushStream);
+    };
+
+    pushMessage({
+      id: messageId,
+      at: new Date().toISOString(),
+      role: "assistant",
+      kind: "agent-stream",
+      markdown: "",
+      thinking: null,
+    });
+
     try {
-      const result = await runChatAgent(selectedDocument.root, question, credentials);
-      if (requestId !== agentRequestRef.current) return;
-      pushMessage({
-        id: makeMessageId(),
-        at: new Date().toISOString(),
-        role: "assistant",
-        kind: "agent-answer",
-        markdown: result.markdown,
-        refs: referencesForAnswer(selectedDocument.root, result.references, question),
-        execution: { model: result.model, elapsedMs: result.elapsedMs },
+      const result = await runChatAgentStreaming(selectedDocument.root, question, credentials, (event) => {
+        if (event.type === "thinking") {
+          streamThinking += event.delta;
+          scheduleStreamFlush();
+        } else if (event.type === "text") {
+          streamMarkdown += event.delta;
+          scheduleStreamFlush();
+        }
       });
+      if (requestId !== agentRequestRef.current) return;
+      streamSettled = true;
+      if (streamFlushFrameRef.current !== null) cancelAnimationFrame(streamFlushFrameRef.current);
+      streamFlushFrameRef.current = null;
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === messageId
+            ? {
+                id: messageId,
+                at: message.at,
+                role: "assistant",
+                kind: "agent-answer",
+                markdown: result.markdown,
+                refs: referencesForAnswer(selectedDocument.root, result.references, question),
+                execution: { model: result.model, elapsedMs: result.elapsedMs },
+              }
+            : message,
+        ),
+      );
     } catch (error) {
       if (requestId !== agentRequestRef.current) return;
+      streamSettled = true;
+      if (streamFlushFrameRef.current !== null) cancelAnimationFrame(streamFlushFrameRef.current);
+      streamFlushFrameRef.current = null;
+      setMessages((previous) => previous.filter((message) => message.id !== messageId));
       pushError(error instanceof Error ? `Agent unavailable. ${error.message} Showing local matches instead.` : "Agent unavailable. Showing local matches instead.");
       pushMessage({
         id: makeMessageId(),
@@ -515,6 +582,17 @@ function ChatBubble({ message, onReferenceClick }: ChatBubbleProps) {
             <p>No passages matched that. Try different words from the document.</p>
           )
         )}
+        {message.kind === "agent-stream" && (
+          <>
+            {message.thinking && (
+              <details className="thinking-details">
+                <summary>Thinking</summary>
+                <div className="thinking-body">{message.thinking}</div>
+              </details>
+            )}
+            <MarkdownBody markdown={message.markdown} streaming />
+          </>
+        )}
         {message.kind === "agent-answer" && (
           <>
             <MarkdownBody markdown={message.markdown} />
@@ -563,9 +641,20 @@ function ReferenceList({ refs, onReferenceClick }: ReferenceListProps) {
   ));
 }
 
-function MarkdownBody({ markdown }: { markdown: string }) {
-  const html = DOMPurify.sanitize(marked.parse(markdown, { breaks: true, gfm: true, async: false }));
-  return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />;
+function MarkdownBody({ markdown, streaming = false }: { markdown: string; streaming?: boolean }) {
+  return (
+    <div className="markdown-body">
+      <Suspense fallback={<div className="markdown-fallback">{markdown}</div>}>
+        <StreamingMarkdown
+          content={markdown}
+          fade={!streaming}
+          final={!streaming}
+          smoothStreaming={streaming ? "auto" : false}
+          typewriter={streaming}
+        />
+      </Suspense>
+    </div>
+  );
 }
 
 function AgentExecutionMeta({ execution }: { execution: AgentExecution }) {
