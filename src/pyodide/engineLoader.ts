@@ -32,7 +32,11 @@ type WorkerResponse = WorkerStatusMessage | WorkerResultMessage | WorkerErrorMes
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
+
+/** How long a single agent request may run before the worker is discarded. */
+const REQUEST_TIMEOUT_MS = 120_000;
 
 let worker: Worker | null = null;
 let requestSequence = 0;
@@ -46,8 +50,12 @@ function setEngineStatus(status: EngineStatus): void {
 }
 
 function rejectPending(error: Error): void {
-  for (const pending of pendingRequests.values()) pending.reject(error);
+  const entries = [...pendingRequests.values()];
   pendingRequests.clear();
+  for (const pending of entries) {
+    clearTimeout(pending.timer);
+    pending.reject(error);
+  }
 }
 
 function createWorker(): Worker {
@@ -62,6 +70,7 @@ function createWorker(): Worker {
     const pending = message.requestId === undefined ? undefined : pendingRequests.get(message.requestId);
     if (!pending) return;
     pendingRequests.delete(message.requestId!);
+    clearTimeout(pending.timer);
     if (message.type === "error") pending.reject(new Error(message.message));
     else pending.resolve(message.result);
   };
@@ -81,14 +90,28 @@ function requestAgent(request: AgentRequest): Promise<unknown> {
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
     const { credentials, ...command } = request;
-    activeWorker.postMessage({
-      requestId,
-      ...command,
-      modelId: credentials.modelId,
-      apiKey: credentials.apiKey,
-    });
+    try {
+      activeWorker.postMessage({
+        requestId,
+        ...command,
+        modelId: credentials.modelId,
+        apiKey: credentials.apiKey,
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error("The browser agent could not accept the request."));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      pendingRequests.delete(requestId);
+      reject(new Error("The agent request timed out."));
+      activeWorker.terminate();
+      if (worker === activeWorker) worker = null;
+      rejectPending(new Error("The browser agent timed out and was stopped."));
+      setEngineStatus({ state: "idle" });
+    }, REQUEST_TIMEOUT_MS);
+    pendingRequests.set(requestId, { resolve, reject, timer });
   });
 }
 

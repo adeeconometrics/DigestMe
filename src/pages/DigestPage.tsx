@@ -15,13 +15,13 @@ import type { DocumentNode, ParsedDocument } from "../parser";
 import { referencesForAnswer, executionDescription, formatExecutionTime, mapAgentReferences } from "../chat/agentChat";
 import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
-import { runCaseDigestAgent, runChatAgent } from "../pyodide/engineLoader";
+import { disposeEngine, runCaseDigestAgent, runChatAgent, subscribeEngineStatus } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 
 type DigestStatus = "idle" | "parsing" | "error";
-type AgentStatus = "idle" | "running";
+type AgentStatus = "idle" | "running" | "failed";
 
 interface ChatMessageBase {
   id: string;
@@ -109,9 +109,28 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
-  useEffect(() => () => {
-    for (const url of docxUrlsRef.current) URL.revokeObjectURL(url);
-  }, []);
+  // Surface engine crashes as a persistent "failed" state, and clear it once a
+  // reload resets the engine. In-flight requests set their own "running" state.
+  useEffect(
+    () =>
+      subscribeEngineStatus((status) => {
+        setAgentStatus((current) => {
+          if (status.state === "failed") return "failed";
+          if (status.state === "idle" && current === "failed") return "idle";
+          return current;
+        });
+      }),
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      agentRequestRef.current += 1;
+      disposeEngine();
+      for (const url of docxUrlsRef.current) URL.revokeObjectURL(url);
+    },
+    [],
+  );
 
   // Sidebar "New session": clear the thread and selection.
   const firstSessionToken = useRef(sessionToken);
@@ -328,6 +347,19 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     void submitQuestion(draft);
   }
 
+  /** Stop a running agent request and tear down the worker. */
+  function handleCancelAgent(): void {
+    agentRequestRef.current += 1;
+    setAgentStatus("idle");
+    disposeEngine();
+  }
+
+  /** Reset the engine after it crashed so the next request starts fresh. */
+  function handleReloadAgent(): void {
+    setAgentStatus("idle");
+    disposeEngine();
+  }
+
   function handleReferenceClick(hit: RetrievalHit): void {
     setSelectedNodeId(hit.nodeId);
     setFocusRequest({ nodeId: hit.nodeId, nonce: Date.now() });
@@ -379,7 +411,29 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
           {agentStatus === "running" && (
             <div className="agent-progress" role="status">
               <span className="agent-progress-dot" />
-              Reading the document with the case-digest agent...
+              <span>Reading the document with the case-digest agent...</span>
+              <button
+                className="agent-progress-action"
+                onClick={handleCancelAgent}
+                title="Stop the agent"
+                type="button"
+              >
+                <Icon name="close" size={12} />
+              </button>
+            </div>
+          )}
+          {agentStatus === "failed" && (
+            <div className="agent-progress is-failed" role="status">
+              <span className="agent-progress-dot" />
+              <span>The case-digest agent stopped unexpectedly.</span>
+              <button
+                className="agent-progress-action"
+                onClick={handleReloadAgent}
+                title="Reload the agent"
+                type="button"
+              >
+                reload
+              </button>
             </div>
           )}
           <div className="chat-quick-actions">
