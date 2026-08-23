@@ -43,6 +43,9 @@ interface PendingRequest {
   onStream?: (event: unknown) => void;
 }
 
+/** Give the on-device agent room to stream long answers, but never hang forever. */
+const REQUEST_TIMEOUT_MS = 180_000;
+
 let worker: Worker | null = null;
 let requestSequence = 0;
 let engineStatus: EngineStatus = { state: "idle" };
@@ -99,7 +102,27 @@ function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject, onStream });
+    const timeoutId = window.setTimeout(() => {
+      // A hung request would otherwise block every later request in the worker
+      // chain and leave the chat stuck on an empty streaming bubble. Reject it
+      // and swap in a fresh worker so the next attempt starts clean.
+      if (!pendingRequests.delete(requestId)) return;
+      reject(new Error("The on-device agent took too long to respond."));
+      activeWorker.terminate();
+      if (worker === activeWorker) worker = null;
+    }, REQUEST_TIMEOUT_MS);
+
+    pendingRequests.set(requestId, {
+      resolve: (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      reject: (reason) => {
+        window.clearTimeout(timeoutId);
+        reject(reason);
+      },
+      onStream,
+    });
     const { credentials, ...command } = request;
     activeWorker.postMessage({
       requestId,
