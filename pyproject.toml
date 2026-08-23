@@ -23,13 +23,13 @@ dev = [
 packages = ["engine"]
 
 [tool.setuptools.package-dir]
-engine = "."
+engine = "src/engine"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["py-tests"]
 
 [tool.mypy]
-files = ["__init__.py", "schemas.py", "document.py", "search.py", "tools.py", "agent.py", "tests"]
+files = ["src/engine", "py-tests"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
@@ -37,6 +37,7 @@ exclude = ["^\\.venv/", "^\\.pytest_cache/"]
 
 [tool.pylint.main]
 py-version = "3.12"
+ignore = ["build", "dist"]
 
 [tool.pylint.messages_control]
 disable = [
