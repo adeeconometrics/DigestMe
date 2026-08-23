@@ -15,6 +15,7 @@ export default defineConfig({
         "src/chat/retrieval.ts",
         "src/graph/treeGraph.ts",
         "src/pdf/reference.ts",
+        "src/pyodide/artifactCache.ts",
       ],
       exclude: ["tests/**", "src/parser/types.ts"],
     },
