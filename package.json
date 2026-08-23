@@ -17,6 +17,7 @@
   "dependencies": {
     "@firecrawl/pdf-inspector-wasm": "^1.17.0",
     "docx": "^9.7.1",
+    "docx-preview": "^0.4.0",
     "dompurify": "^3.4.14",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
