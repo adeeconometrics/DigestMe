@@ -75,7 +75,7 @@ async function loadEngine(): Promise<PyodideAPI> {
   postStatus("loading", "Installing the case-digest agent...");
   await pyodide.runPythonAsync(`
 import micropip
-await micropip.install(["httpcore2", "pydantic-ai-slim[openrouter]"])
+await micropip.install(["httpcore2==2.12.0", "pydantic-ai-slim[openrouter]==2.33.0"])
 `);
   writeEngineSources(pyodide);
   await pyodide.runPythonAsync(`
