@@ -160,10 +160,10 @@ function parseFacts(value: unknown): CaseDigestFacts {
     petition: requiredStringArray(value, "petition", "facts.petition"),
   };
 
-  if (value.petitioner_version !== undefined) {
+  if (value.petitioner_version !== undefined && value.petitioner_version !== null) {
     facts.petitioner_version = requiredStringArray(value, "petitioner_version", "facts.petitioner_version");
   }
-  if (value.respondent_version !== undefined) {
+  if (value.respondent_version !== undefined && value.respondent_version !== null) {
     facts.respondent_version = requiredStringArray(value, "respondent_version", "facts.respondent_version");
   }
 
@@ -188,7 +188,7 @@ function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
     ruling: requiredString(value, "ruling", `${path}.ruling`),
     ratio: requiredString(value, "ratio", `${path}.ratio`),
   };
-  if (value.issue !== undefined) {
+  if (value.issue !== undefined && value.issue !== null) {
     issue.issue = requiredString(value, "issue", `${path}.issue`);
   }
   return issue;
