@@ -9,23 +9,25 @@ Everything is client-side: `@firecrawl/pdf-inspector-wasm` converts a PDF to mar
 ## Commands
 
 - `npm run dev` — dev server (served at `/`)
-- `npm run build` — `tsc -b && vite build`. **The CI check**: no lint. Run it before finishing any change; CI runs exactly this.
-- `npx tsc -b` — fast typecheck-only pass (tsconfig is solution-style with app/node references)
-- `npm test` — `vitest run` (node environment, no jsdom)
+- `npm run build` — `tsc -b && vite build`. **The CI check**; run it before finishing any change.
+- `npm run typecheck` — `tsc -b` only (app + node + test tsconfigs)
+- `npm run lint` — `oxlint` (Rust linter; typescript-eslint cannot run on TypeScript 7's native compiler)
+- `npm test` — `vitest run --coverage` (node environment, no jsdom; reports v8 coverage)
 - `npm run test:watch` — vitest watch mode
 - `npm run test:coverage` — vitest + v8 coverage over the pure-logic modules
 - `npm run preview` — serve the production build
 
 ## Test conventions
 
-- Unit tests live next to the module as `src/**/*.test.ts` and run in the node environment (no jsdom).
-- Shared fixtures and builders live in `src/test/factories.ts` — prefer a builder with overrides over full literal objects so cases stay readable and extensible.
-- `src/lib/db.test.ts` uses `fake-indexeddb`, shimmed in `test/setup.ts`; keep one database per test file and manage state through the exported API.
+- Unit tests live in `tests/` as `*.test.ts` and run in the node environment (no jsdom); they are typechecked via `tsconfig.test.json`.
+- Shared fixtures and builders live in `tests/factories.ts` — prefer a builder with overrides over full literal objects so cases stay readable and extensible.
+- `tests/db.test.ts` uses `fake-indexeddb`, shimmed in `tests/setup.ts`; keep one database per test file and manage state through the exported API.
 - Assert the happy path first, then one focused case per edge.
+- Coverage is scoped to the pure-logic modules (`src/lib`, `contextTree`, `retrieval`, `treeGraph`, `reference`, `pdfParser`) — not the `.tsx` UI shell.
 
 ## Deploy gotchas
 
-- **Every push to `main` deploys to production GitHub Pages** (`.github/workflows/ci.yml` has a deploy job gated on push to main). PRs only get the build check.
+- **Every push to `main` deploys to production GitHub Pages** (`.github/workflows/ci.yml` runs lint/test/typecheck/build, then deploys on push to main). PRs only get the check jobs.
 - `vite.config.ts` sets `base: "/DigestMe/"` when `GITHUB_ACTIONS=true`, otherwise `/`. Reference assets via Vite imports/relative paths — hardcoded absolute URLs break on Pages.
 
 ## Layout
