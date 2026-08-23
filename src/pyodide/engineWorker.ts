@@ -51,7 +51,7 @@ function postStatus(state: WorkerResponse["state"], message?: string): void {
 function summarizeError(error: unknown): string {
   const raw = error instanceof Error ? error.message : "The case-digest agent failed.";
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const summary = lines.findLast((line) => /^[\w.]+(?:Error|Exception):\s/.test(line)) ?? lines.at(-1);
+  const summary = [...lines].reverse().find((line) => /^[\w.]+(?:Error|Exception):\s/.test(line)) ?? lines[lines.length - 1];
   if (!summary) return "The case-digest agent failed.";
   return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
 }
