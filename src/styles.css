@@ -1991,7 +1991,7 @@ input:focus-visible,
 
 .change-file-button {
   margin-left: auto;
-  padding: 5px;
+  padding: 5px;       
   color: var(--ink-soft);
   background: transparent;
   font-size: 10px;
