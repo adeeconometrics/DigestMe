@@ -110,6 +110,27 @@ export async function getDecks(): Promise<Deck[]> {
   return requestValue(transaction.objectStore(DECK_STORE).getAll());
 }
 
+/** Read a namespaced value from the local metadata store. */
+export async function getMetaValue<T>(key: string): Promise<T | undefined> {
+  const database = await openDatabase();
+  const record = await requestValue<{ key: string; value: T } | undefined>(
+    database.transaction(META_STORE, "readonly").objectStore(META_STORE).get(key),
+  );
+  return record?.value;
+}
+
+/** Write a namespaced value to the local metadata store. */
+export async function putMetaValue<T>(key: string, value: T): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, META_STORE, "readwrite", (store) => store.put({ key, value }));
+}
+
+/** Remove a namespaced value from the local metadata store. */
+export async function removeMetaValue(key: string): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, META_STORE, "readwrite", (store) => store.delete(key));
+}
+
 /** Seed once so a new install has a useful study surface without reappearing after deletion. */
 export async function getDecksWithStarter(): Promise<Deck[]> {
   const database = await openDatabase();
