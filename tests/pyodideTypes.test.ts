@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCaseDigestAgentResult, parseChatAgentResult } from "../src/pyodide/types";
+import { parseCaseDigestAgentResult, parseChatAgentResult, parseChatStreamEvent } from "../src/pyodide/types";
 import rawMockJson from "./fixtures/case-digest.mock.json";
 
 const reference = {
@@ -18,6 +18,8 @@ describe("Pyodide result contracts", () => {
       references: [reference],
       model: "deepseek/deepseek-v3",
       elapsed_ms: 1200,
+      started_at: 1767323045000,
+      ended_at: 1767323046200,
     })).toEqual({
       markdown: "## Answer\n\nGrounded.",
       references: [{
@@ -30,6 +32,8 @@ describe("Pyodide result contracts", () => {
       }],
       model: "deepseek/deepseek-v3",
       elapsedMs: 1200,
+      startedAt: 1767323045000,
+      endedAt: 1767323046200,
     });
   });
 
@@ -48,6 +52,32 @@ describe("Pyodide result contracts", () => {
   it("rejects malformed execution metadata", () => {
     expect(() => parseChatAgentResult({ markdown: "answer", references: [], model: "model", elapsed_ms: -1 })).toThrow(
       "Agent returned an invalid execution time.",
+    );
+  });
+
+  it("normalizes streamed part and tool events from the Python boundary", () => {
+    expect(parseChatStreamEvent({
+      type: "part-start",
+      index: 0,
+      kind: "text",
+      content: "## Holding",
+    })).toEqual({ type: "part-start", index: 0, kind: "text", content: "## Holding" });
+    expect(parseChatStreamEvent({
+      type: "tool-result",
+      tool_call_id: "call-1",
+      content: "section loaded",
+      is_error: false,
+    })).toEqual({
+      type: "tool-result",
+      toolCallId: "call-1",
+      content: "section loaded",
+      isError: false,
+    });
+  });
+
+  it("rejects unknown streamed event types", () => {
+    expect(() => parseChatStreamEvent({ type: "unknown" })).toThrow(
+      "Agent returned an unknown chat stream event: unknown",
     );
   });
 });

@@ -14,15 +14,17 @@ interface WorkerRequest {
   command: "chat" | "digest";
   root: unknown;
   question?: string;
+  stream?: boolean;
   modelId: string;
   apiKey: string;
 }
 
 interface WorkerResponse {
-  type: "status" | "result" | "error";
+  type: "status" | "stream" | "result" | "error";
   requestId?: number;
   state?: "idle" | "loading" | "ready" | "failed";
   message?: string;
+  event?: unknown;
   result?: unknown;
 }
 
@@ -81,7 +83,7 @@ await micropip.install(["httpcore2==2.12.0", "pydantic-ai-slim[openrouter]==2.33
   await pyodide.runPythonAsync(`
 import sys
 sys.path.insert(0, ${JSON.stringify(ENGINE_ROOT)})
-from engine.bridge import run_request
+from engine.bridge import run_request, run_request_stream
 `);
   postStatus("ready");
   return pyodide;
@@ -107,11 +109,25 @@ async function execute(request: WorkerRequest): Promise<unknown> {
     api_key: request.apiKey,
   });
   pyodide.globals.set("request_payload", payload);
+  const streamCallback = request.stream
+    ? (event: unknown) => {
+        const eventJson = typeof event === "string" ? event : String(event);
+        workerScope.postMessage({
+          type: "stream",
+          requestId: request.requestId,
+          event: JSON.parse(eventJson),
+        });
+      }
+    : undefined;
+  if (streamCallback) pyodide.globals.set("stream_callback", streamCallback);
   try {
-    const result = await pyodide.runPythonAsync("await run_request(request_payload)");
+    const pythonCall = request.stream
+      ? "await run_request_stream(request_payload, stream_callback)"
+      : "await run_request(request_payload)";
+    const result = await pyodide.runPythonAsync(pythonCall);
     return JSON.parse(String(result));
   } finally {
-    pyodide.runPython("request_payload = None");
+    pyodide.runPython("request_payload = None\nstream_callback = None");
   }
 }
 

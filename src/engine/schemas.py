@@ -203,6 +203,8 @@ class ChatAnswer(BaseModel):
     references: list[DocumentReference] = Field(default_factory=list)
     model: str
     elapsed_ms: int = Field(ge=0)
+    started_at: int | None = Field(default=None, ge=0)
+    ended_at: int | None = Field(default=None, ge=0)
 
 
 class CaseDigestResult(BaseModel):

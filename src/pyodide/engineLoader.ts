@@ -1,6 +1,9 @@
+import type { AssistantMessage } from "assistant-stream";
 import type { DocumentNode } from "../parser";
+import { createChatStreamAccumulator } from "../chat/agentStream";
 import {
   parseCaseDigestAgentResult,
+  parseChatStreamEvent,
   parseChatAgentResult,
   type AgentCredentials,
   type AgentRequest,
@@ -21,17 +24,24 @@ interface WorkerResultMessage {
   result: unknown;
 }
 
+interface WorkerStreamMessage {
+  type: "stream";
+  requestId: number;
+  event: unknown;
+}
+
 interface WorkerErrorMessage {
   type: "error";
   requestId?: number;
   message: string;
 }
 
-type WorkerResponse = WorkerStatusMessage | WorkerResultMessage | WorkerErrorMessage;
+type WorkerResponse = WorkerStatusMessage | WorkerStreamMessage | WorkerResultMessage | WorkerErrorMessage;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  onStream?: (event: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -67,6 +77,19 @@ function createWorker(): Worker {
       return;
     }
 
+    if (message.type === "stream") {
+      const pending = pendingRequests.get(message.requestId);
+      if (!pending?.onStream) return;
+      try {
+        pending.onStream(message.event);
+      } catch (error) {
+        pendingRequests.delete(message.requestId);
+        clearTimeout(pending.timer);
+        pending.reject(error instanceof Error ? error : new Error("The agent stream was invalid."));
+      }
+      return;
+    }
+
     const pending = message.requestId === undefined ? undefined : pendingRequests.get(message.requestId);
     if (!pending) return;
     pendingRequests.delete(message.requestId!);
@@ -84,7 +107,7 @@ function createWorker(): Worker {
   return nextWorker;
 }
 
-function requestAgent(request: AgentRequest): Promise<unknown> {
+function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void): Promise<unknown> {
   const activeWorker = worker ?? (worker = createWorker());
   const requestId = ++requestSequence;
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
@@ -95,6 +118,7 @@ function requestAgent(request: AgentRequest): Promise<unknown> {
       activeWorker.postMessage({
         requestId,
         ...command,
+        stream: Boolean(onStream),
         modelId: credentials.modelId,
         apiKey: credentials.apiKey,
       });
@@ -111,7 +135,7 @@ function requestAgent(request: AgentRequest): Promise<unknown> {
       rejectPending(new Error("The browser agent timed out and was stopped."));
       setEngineStatus({ state: "idle" });
     }, REQUEST_TIMEOUT_MS);
-    pendingRequests.set(requestId, { resolve, reject, timer });
+    pendingRequests.set(requestId, { resolve, reject, onStream, timer });
   });
 }
 
@@ -131,6 +155,28 @@ export async function runChatAgent(
   credentials: AgentCredentials,
 ): Promise<ChatAgentResult> {
   return parseChatAgentResult(await requestAgent({ command: "chat", root, question, credentials }));
+}
+
+export async function streamChatAgent(
+  root: DocumentNode,
+  question: string,
+  credentials: AgentCredentials,
+  onUpdate: (message: AssistantMessage) => void,
+): Promise<ChatAgentResult> {
+  const stream = createChatStreamAccumulator(onUpdate);
+  try {
+    const result = parseChatAgentResult(
+      await requestAgent(
+        { command: "chat", root, question, credentials },
+        (event) => stream.push(parseChatStreamEvent(event)),
+      ),
+    );
+    await stream.finish();
+    return result;
+  } catch (error) {
+    await stream.abort();
+    throw error;
+  }
 }
 
 export async function runCaseDigestAgent(

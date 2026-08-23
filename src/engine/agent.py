@@ -1,10 +1,11 @@
 """Pydantic AI case-digest agent definition."""
 
 import sys
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 
 from httpx2 import AsyncClient, Request, Response
 from httpx2._transports import AsyncHTTPTransport
+from httpx2._types import AsyncByteStream
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
@@ -72,6 +73,24 @@ def _openrouter_provider(*, api_key: str) -> OpenRouterProvider:
     if sys.platform != "emscripten":
         return OpenRouterProvider(api_key=api_key)
 
+    class _BytesStream(AsyncByteStream):
+        """Coerce pyodide ``memoryview`` chunks into ``bytes`` for the SSE decoder.
+
+        httpcore2's pyodide network backend yields ``memoryview`` slices, which the
+        openai SDK's streaming parser feeds to ``str.splitlines`` and rejects. Wrapping
+        the response stream normalizes every chunk to ``bytes`` without copying.
+        """
+
+        def __init__(self, stream: AsyncByteStream) -> None:
+            self._stream = stream
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            async for chunk in self._stream:
+                yield bytes(chunk) if isinstance(chunk, memoryview) else chunk
+
+        async def aclose(self) -> None:
+            await self._stream.aclose()
+
     class _BrowserSafeTransport(AsyncHTTPTransport):
         """Async transport that strips CORS-unsafe telemetry headers."""
 
@@ -83,7 +102,16 @@ def _openrouter_provider(*, api_key: str) -> OpenRouterProvider:
                 stream=request.stream,
                 extensions=request.extensions,
             )
-            return await super().handle_async_request(safe_request)
+            response = await super().handle_async_request(safe_request)
+            return Response(
+                response.status_code,
+                headers=response.headers,
+                stream=_BytesStream(response.stream),
+                request=safe_request,
+                extensions=response.extensions,
+                history=response.history,
+                default_encoding=response.default_encoding,
+            )
 
     return OpenRouterProvider(api_key=api_key, http_client=AsyncClient(transport=_BrowserSafeTransport()))
 

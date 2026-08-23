@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
+import type { AssistantMessage } from "assistant-stream";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import Icon from "../components/Icon";
@@ -12,10 +13,11 @@ import { caseDigestToMarkdown } from "../lib/caseDigestMarkdown";
 import { getAgentRuntimeCredentials } from "../lib/agentSettings";
 import { flattenTree, isPdfFile, parsePdf } from "../parser";
 import type { DocumentNode, ParsedDocument } from "../parser";
-import { referencesForAnswer, executionDescription, formatExecutionTime, mapAgentReferences } from "../chat/agentChat";
+import { assistantText, assistantThinking, createInitialAssistantMessage } from "../chat/agentStream";
+import { referencesForAnswer, executionDescription, formatExecutionTime, formatExecutionTimestamp, mapAgentReferences } from "../chat/agentChat";
 import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
-import { disposeEngine, runCaseDigestAgent, runChatAgent, subscribeEngineStatus } from "../pyodide/engineLoader";
+import { disposeEngine, runCaseDigestAgent, streamChatAgent, subscribeEngineStatus } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
@@ -50,6 +52,14 @@ type ChatMessage =
       kind: "agent-answer";
       markdown: string;
       refs: RetrievalHit[];
+      execution: AgentExecution;
+      assistant?: AssistantMessage;
+    })
+  | (ChatMessageBase & {
+      role: "assistant";
+      kind: "agent-stream";
+      markdown: string;
+      assistant: AssistantMessage;
       execution: AgentExecution;
     })
   | (ChatMessageBase & {
@@ -101,6 +111,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const agentRequestRef = useRef(0);
+  const activeStreamMessageRef = useRef<string | null>(null);
   const docxUrlsRef = useRef<Set<string>>(new Set());
 
   const selectedNode: DocumentNode | null = useMemo(() => {
@@ -146,6 +157,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   useEffect(() => {
     if (sessionToken === firstSessionToken.current) return;
     agentRequestRef.current += 1;
+    activeStreamMessageRef.current = null;
     setSelected(null);
     setSelectedFile(null);
     setSelectedNodeId(null);
@@ -169,6 +181,11 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
 
   function openSession(parsed: ParsedDocument, file: StoredDocumentFile): void {
     agentRequestRef.current += 1;
+    const activeStreamMessageId = activeStreamMessageRef.current;
+    activeStreamMessageRef.current = null;
+    if (activeStreamMessageId) {
+      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
+    }
     setAgentStatus("idle");
     setSelected(parsed);
     setSelectedFile(file);
@@ -222,6 +239,11 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   async function handleSelect(summaryId: string): Promise<void> {
     if (selected?.id === summaryId) return;
     agentRequestRef.current += 1;
+    const activeStreamMessageId = activeStreamMessageRef.current;
+    activeStreamMessageRef.current = null;
+    if (activeStreamMessageId) {
+      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
+    }
     setAgentStatus("idle");
     try {
       const source = await getDocumentWithSource(summaryId);
@@ -323,20 +345,59 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     }
 
     setAgentStatus("running");
+    const streamMessageId = makeMessageId();
+    const streamStartedAt = Date.now();
+    let latestAssistant = createInitialAssistantMessage();
+    activeStreamMessageRef.current = streamMessageId;
+    pushMessage({
+      id: streamMessageId,
+      at: new Date().toISOString(),
+      role: "assistant",
+      kind: "agent-stream",
+      markdown: "",
+      assistant: latestAssistant,
+      execution: { model: credentials.modelId, elapsedMs: 0, startedAt: streamStartedAt },
+    });
     try {
-      const result = await runChatAgent(selectedDocument.root, question, credentials);
-      if (requestId !== agentRequestRef.current) return;
-      pushMessage({
-        id: makeMessageId(),
-        at: new Date().toISOString(),
-        role: "assistant",
-        kind: "agent-answer",
-        markdown: result.markdown,
-        refs: referencesForAnswer(selectedDocument.root, result.references, question),
-        execution: { model: result.model, elapsedMs: result.elapsedMs },
+      const result = await streamChatAgent(selectedDocument.root, question, credentials, (assistant) => {
+        latestAssistant = assistant;
+        if (requestId !== agentRequestRef.current) return;
+        setMessages((previous) => previous.map((message) => {
+          if (message.id !== streamMessageId || message.kind !== "agent-stream") return message;
+          return {
+            ...message,
+            markdown: assistantText(assistant),
+            assistant,
+            execution: {
+              ...message.execution,
+              elapsedMs: Math.max(0, Date.now() - streamStartedAt),
+            },
+          };
+        }));
       });
+      if (requestId !== agentRequestRef.current) return;
+      const execution: AgentExecution = {
+        model: result.model,
+        elapsedMs: result.elapsedMs,
+        startedAt: result.startedAt ?? streamStartedAt,
+        endedAt: result.endedAt ?? Date.now(),
+      };
+      setMessages((previous) => previous.map((message) => {
+        if (message.id !== streamMessageId || message.kind !== "agent-stream") return message;
+        return {
+          ...message,
+          kind: "agent-answer" as const,
+          markdown: result.markdown,
+          refs: referencesForAnswer(selectedDocument.root, result.references, question),
+          execution,
+          assistant: latestAssistant,
+        };
+      }));
+      activeStreamMessageRef.current = null;
     } catch (error) {
       if (requestId !== agentRequestRef.current) return;
+      activeStreamMessageRef.current = null;
+      setMessages((previous) => previous.filter((message) => message.id !== streamMessageId));
       pushError(error instanceof Error ? `Agent unavailable. ${error.message} Showing local matches instead.` : "Agent unavailable. Showing local matches instead.");
       pushMessage({
         id: makeMessageId(),
@@ -347,6 +408,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
         refs: retrieveNodes(selectedDocument.root, question, 3),
       });
     } finally {
+      if (activeStreamMessageRef.current === streamMessageId) activeStreamMessageRef.current = null;
       if (requestId === agentRequestRef.current) setAgentStatus("idle");
     }
   }
@@ -360,6 +422,11 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   /** Stop a running agent request and tear down the worker. */
   function handleCancelAgent(): void {
     agentRequestRef.current += 1;
+    const activeStreamMessageId = activeStreamMessageRef.current;
+    activeStreamMessageRef.current = null;
+    if (activeStreamMessageId) {
+      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
+    }
     setAgentStatus("idle");
     disposeEngine();
   }
@@ -427,7 +494,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
           {agentStatus === "running" && (
             <div className="agent-progress" role="status">
               <span className="agent-progress-dot" />
-              <span>Reading the document with the case-digest agent...</span>
+               <span>Thinking, reading, and writing with the case-digest agent...</span>
               <button
                 className="agent-progress-action"
                 onClick={handleCancelAgent}
@@ -599,6 +666,7 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
         )}
         {message.kind === "agent-answer" && (
           <>
+            {message.assistant && <AssistantActivity message={message.assistant} />}
             <MarkdownBody markdown={message.markdown} />
             <AgentExecutionMeta execution={message.execution} />
             {message.refs.length > 0 && (
@@ -607,6 +675,17 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
                 <ReferenceList refs={message.refs} onReferenceClick={onReferenceClick} />
               </div>
             )}
+          </>
+        )}
+        {message.kind === "agent-stream" && (
+          <>
+            <AssistantActivity isStreaming message={message.assistant} />
+            {message.markdown ? (
+              <MarkdownBody markdown={message.markdown} streaming />
+            ) : (
+              <p className="agent-stream-placeholder">The agent is reading the document...</p>
+            )}
+            <AgentExecutionMeta execution={message.execution} live />
           </>
         )}
         {message.kind === "digest" && (
@@ -634,6 +713,58 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
   );
 }
 
+type AgentToolPart = Extract<AssistantMessage["parts"][number], { type: "tool-call" }>;
+
+function AssistantActivity({ message, isStreaming = false }: { message: AssistantMessage; isStreaming?: boolean }) {
+  const thinking = assistantThinking(message);
+  const tools = message.parts.filter((part): part is AgentToolPart => part.type === "tool-call");
+  if (!thinking && tools.length === 0) return null;
+
+  return (
+    <div className="assistant-activity">
+      {thinking && (
+        <details className="agent-thinking" open={isStreaming}>
+          <summary><span className="agent-activity-dot is-thinking" />{isStreaming ? "Thinking" : "Reasoning"}</summary>
+          <div className="agent-thinking-content">{thinking}</div>
+        </details>
+      )}
+      {tools.map((tool) => <ToolCallActivity key={tool.toolCallId} tool={tool} isStreaming={isStreaming} />)}
+    </div>
+  );
+}
+
+function ToolCallActivity({ tool, isStreaming }: { tool: AgentToolPart; isStreaming: boolean }) {
+  const complete = tool.result !== undefined;
+  const result = tool.result === undefined ? "" : displayStreamValue(tool.result);
+  return (
+    <details className="agent-tool-call" open={isStreaming && !complete}>
+      <summary>
+        <span className={`agent-activity-dot ${complete ? "is-complete" : "is-running"}`} />
+        <strong>{tool.toolName}</strong>
+        <small>{complete ? "complete" : "running"}</small>
+      </summary>
+      {tool.argsText && (
+        <div className="agent-tool-block">
+          <span>Arguments</span>
+          <pre>{tool.argsText}</pre>
+        </div>
+      )}
+      {complete && (
+        <div className="agent-tool-block">
+          <span>Result</span>
+          <pre>{result}</pre>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function displayStreamValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  const serialized = JSON.stringify(value);
+  return serialized ?? String(value);
+}
+
 interface ReferenceListProps {
   refs: RetrievalHit[];
   onReferenceClick: (hit: RetrievalHit) => void;
@@ -648,19 +779,21 @@ function ReferenceList({ refs, onReferenceClick }: ReferenceListProps) {
   ));
 }
 
-function MarkdownBody({ markdown }: { markdown: string }) {
+function MarkdownBody({ markdown, streaming = false }: { markdown: string; streaming?: boolean }) {
   const html = DOMPurify.sanitize(marked.parse(markdown, { breaks: true, gfm: true, async: false }));
-  return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={`markdown-body ${streaming ? "is-streaming" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function AgentExecutionMeta({ execution }: { execution: AgentExecution }) {
+function AgentExecutionMeta({ execution, live = false }: { execution: AgentExecution; live?: boolean }) {
   const description = executionDescription(execution);
   return (
     <span aria-label={description} className="agent-execution" tabIndex={0} title={description}>
       <Icon name="clock" size={13} />
       <span className="agent-execution-tooltip" role="tooltip">
         <strong>{execution.model}</strong>
-        <small>{formatExecutionTime(execution.elapsedMs)}</small>
+        <small>{live ? "Running · " : ""}{formatExecutionTime(execution.elapsedMs)}</small>
+        {execution.startedAt !== undefined && <small>start {formatExecutionTimestamp(execution.startedAt)}</small>}
+        {execution.endedAt !== undefined && <small>end {formatExecutionTimestamp(execution.endedAt)}</small>}
       </span>
     </span>
   );

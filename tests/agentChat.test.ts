@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatExecutionTime, mapAgentReferences, referencesForAnswer, executionDescription } from "../src/chat/agentChat";
+import { formatExecutionTime, formatExecutionTimestamp, mapAgentReferences, referencesForAnswer, executionDescription } from "../src/chat/agentChat";
 import type { AgentReference } from "../src/pyodide/types";
 import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
@@ -46,5 +46,12 @@ describe("agentChat helpers", () => {
     expect(executionDescription({ model: "deepseek/deepseek-v3", elapsedMs: 1_250 })).toBe(
       "Model: deepseek/deepseek-v3. Execution time: 1.3 s.",
     );
+    expect(formatExecutionTimestamp(Date.UTC(2026, 0, 2, 3, 4, 5))).toBe("2026-01-02 03:04:05 UTC");
+    expect(executionDescription({
+      model: "deepseek/deepseek-v3",
+      elapsedMs: 1_250,
+      startedAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+      endedAt: Date.UTC(2026, 0, 2, 3, 4, 6),
+    })).toContain("Started: 2026-01-02 03:04:05 UTC. Ended: 2026-01-02 03:04:06 UTC.");
   });
 });
