@@ -1,6 +1,6 @@
 """Case-digest engine package."""
 
-from .agent import AGENT_INSTRUCTIONS, build_agent
+from .agent import AGENT_INSTRUCTIONS, build_agent, build_openrouter_agent
 from .document import (
     DocumentNode,
     NavigationEntry,
@@ -25,6 +25,7 @@ __all__ = [
     "SearchHit",
     "SearchResult",
     "build_agent",
+    "build_openrouter_agent",
     "find_section",
     "flatten_tree",
     "global_search",

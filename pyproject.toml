@@ -9,7 +9,7 @@ description = "A pyodide-friendly pydantic-ai harness for case digests."
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.12,<3",
-  "pydantic-ai-slim>=2.33,<3",
+  "pydantic-ai-slim[openrouter]>=2.33,<3",
 ]
 
 [dependency-groups]
