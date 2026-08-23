@@ -4,13 +4,12 @@ import App from "./App";
 import { registerPyodideServiceWorker } from "./pyodide/serviceWorkerRegistration";
 import "./styles.css";
 
-async function bootstrap(): Promise<void> {
-  await registerPyodideServiceWorker();
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  );
-}
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
 
-void bootstrap();
+// The service worker only serves pyodide artifacts for the agent; it must not
+// delay first paint, and registerPyodideServiceWorker swallows its own errors.
+void registerPyodideServiceWorker();
