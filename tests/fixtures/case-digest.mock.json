@@ -1,73 +1,73 @@
 {
-  "case_title": "Stradcom Corp. v. Orpilla",
-  "petitioner": "Stradcom Corp. and Jose A. Chua",
-  "respondent": "Joyce Annabelle L. Orpilla",
-  "topic_subtopic": "1. Toward a Re-Teaching of Labor Law",
-  "subject": "LAW 113: Labor I",
-  "ponente": "Tijam, J.",
-  "gr_no_date": "G.R. No. 206800 | July 2, 2018",
+  "case_title": "Villanueva v. Bayside Port Workers Cooperative",
+  "petitioner": "Ramon Villanueva, Jr.",
+  "respondent": "Bayside Port Workers Cooperative (BPWC)",
+  "topic_subtopic": "3. Cooperative Law — Membership Discipline and Due Process",
+  "subject": "LAW 115: Cooperative and Agrarian Law",
+  "ponente": "Agcaoili, J.",
+  "gr_no_date": "G.R. No. 269420 | March 12, 2024",
   "full_text": "Link to Full Text",
-  "summary": "Orpilla was dismissed after Stradcom lost trust and confidence in her over the handling of a company event, alleged moonlighting, and use of company resources. The Court found a just cause for dismissal but awarded nominal damages because the employer did not comply with the twin-notice requirement.",
-  "doctrine": "An employer may terminate an employee for fraud or willful breach of the trust reposed in the employee under Article 297(c) of the Labor Code, provided the employee holds a position of trust and an act justifies the loss of confidence.",
-  "provisions": "Art. 297, Labor Code of the Philippines\nArticle 297. TERMINATION BY EMPLOYER. - An employer may terminate an employment for any of the following causes:\n- Serious misconduct or willful disobedience;\n- Gross and habitual neglect of duties;\n- Fraud or willful breach of trust;\n- Commission of a crime or offense against the employer; and\n- Other analogous causes.",
+  "summary": "Villanueva, a member-employee of BPWC, was expelled by the cooperative's disciplinary committee after a snapped crane sling delayed a cargo unloading shift. The Court held the expulsion void for failure to comply with the notice-and-hearing requirements of the Cooperative Code, but allowed the cooperative to recommence discipline with proper process.",
+  "doctrine": "Membership in a cooperative is a property right. Expulsion is valid only after the member is given written notice of the charge and a reasonable opportunity to be heard, as required by Article 35 of the Cooperative Code; failure to observe these requirements renders the expulsion void.",
+  "provisions": "Art. 35, Cooperative Code of the Philippines (RA 9520)\nArticle 35. EXPULSION AND WITHDRAWAL OF MEMBERS. - A member may be expelled only for grounds provided by law or the bylaws, and only after prior written notice and a hearing.\n- Expulsion requires a deliberate act of the members or an authorized committee;\n- Written notice of the charge and a hearing must precede any expulsion;\n- The decision may be appealed to the general assembly or the mediation-arbitration system.",
   "facts": {
     "petition": [
-      "Orpilla was hired as Stradcom's Human Resources Administration Department Head, a managerial position.",
-      "She was instructed to include affiliate employees in the company's Christmas party but attempted to exclude them.",
-      "A later review found an inflated catering quote and evidence of moonlighting using company resources.",
-      "After HRAD was reorganized, Orpilla filed a complaint for constructive dismissal."
+      "Villanueva had been a crane operator and member of BPWC for eleven years.",
+      "During a night shift, the crane's sling snapped while hoisting a container, delaying unloading by four hours.",
+      "The disciplinary committee met two days later and expelled Villanueva without a written charge or a hearing.",
+      "He learned of the expulsion from a notice pinned to the cooperative's bulletin board."
     ],
     "respondent_version": [
-      "Orpilla said she was open to a formal investigation and denied that she had resigned.",
-      "She was refused entry to work and learned that her final pay had been deposited."
+      "BPWC said the expulsion followed a documented incident report and that Villanueva had been warned about equipment care.",
+      "It claimed the bulletin-board notice, together with a group briefing, satisfied its internal rules."
     ],
     "petitioner_version": [
-      "Stradcom and Chua said Orpilla had offered to resign and requested leave to consider a settlement.",
-      "They were surprised when she filed a constructive-dismissal complaint."
+      "Villanueva said he was never given a written charge and that the briefing was not a hearing.",
+      "He lost his livelihood and was barred from applying for membership for two years."
     ]
   },
   "petitioners_arguments": [
-    "Orpilla was validly dismissed for just cause based on loss of trust and confidence.",
-    "Her managerial role required a high degree of trust.",
-    "The loss of trust was supported by disobedience, dishonesty, and unauthorized use of company assets."
+    "Expulsion without a written charge and hearing violates Article 35 of the Cooperative Code.",
+    "Membership carries a property right that cannot be taken away without due process.",
+    "A bulletin-board notice does not give a member a reasonable opportunity to defend himself."
   ],
   "respondents_arguments": [
-    "The alleged dishonesty and overpricing were fabricated.",
-    "Orpilla was constructively dismissed when her department was reorganized.",
-    "She was denied procedural due process because no written notices were issued."
+    "The Cooperative Code leaves the details of disciplinary procedure to the cooperative's bylaws.",
+    "The committee's decision was an internal management matter that the courts and the CDA should respect.",
+    "Villanueva's negligence was admitted in the incident report, so a hearing would have changed nothing."
   ],
   "procedural_posture": [
-    "INITIAL ACTION (filed by Orpilla): Complaint for constructive dismissal and monetary claims.",
-    "LA RULING: Ruled for Orpilla and awarded separation pay, backwages, damages, and attorney's fees.",
-    "NLRC RULING: Found a valid dismissal for loss of trust and confidence and modified the award.",
-    "CA RULING: Reversed the NLRC and reinstated the Labor Arbiter's ruling.",
+    "INITIAL ACTION (filed by Villanueva): Petition for reinstatement and damages before the CDA Mediation-Arbitration Unit.",
+    "CDA MA RULING: Ruled for Villanueva and ordered reinstatement with backwages.",
+    "CDA BOARD RULING: Reversed, sustaining the expulsion.",
+    "CA RULING: Affirmed the CDA Board.",
     "PETITION to the SC: Petition for Review on Certiorari under Rule 45."
   ],
   "issues": [
     {
-      "issue": "WON Orpilla was validly dismissed on the ground of loss of trust and confidence.",
+      "issue": "WON Villanueva's expulsion from BPWC is void for failure to comply with the notice-and-hearing requirement.",
       "ruling": "YES",
-      "ratio": "Orpilla held a managerial position of trust. The evidence of dishonesty, mishandling of the event budget, moonlighting, and unauthorized use of company resources gave Stradcom a reasonable basis for its loss of confidence."
+      "ratio": "Article 35 of the Cooperative Code conditions expulsion on prior written notice and a genuine opportunity to be heard. The bulletin-board notice and the group briefing did not satisfy these requirements, so the expulsion was void."
     },
     {
-      "issue": "WON Orpilla's right to statutory procedural due process was violated.",
+      "issue": "WON the disciplinary committee's finding of negligence is valid despite the procedural defect.",
+      "ruling": "NO",
+      "ratio": "The finding was made without the petitioner's participation. A finding reached without a hearing cannot stand, although the cooperative may reopen discipline with proper process."
+    },
+    {
+      "issue": "WON Villanueva is entitled to reinstatement and backwages.",
       "ruling": "YES",
-      "ratio": "The employer did not provide the two written notices required before termination. Because the dismissal was otherwise valid, the Court awarded nominal damages rather than backwages."
+      "ratio": "Because the expulsion was void, he remained a member in contemplation of law. Reinstatement and backwages follow from the void act, without prejudice to a validly conducted disciplinary proceeding."
     },
     {
-      "issue": "WON Jose A. Chua may be held solidarily liable with Stradcom Corporation.",
+      "issue": "WON the CDA Board correctly declined jurisdiction over the expulsion.",
       "ruling": "NO",
-      "ratio": "There was no proof that Chua acted beyond his authority or with personal ill-will. His acts were official acts performed for Stradcom."
-    },
-    {
-      "issue": "WON Orpilla is entitled to backwages, separation pay, damages, and attorney's fees.",
-      "ruling": "NO",
-      "ratio": "Backwages and separation pay require a finding of illegal dismissal. Those monetary claims therefore failed because the dismissal was for just cause."
+      "ratio": "The mediation-arbitration system has jurisdiction over disputes among members and between a member and the cooperative; the Board erred in treating the expulsion as a purely internal act beyond review."
     }
   ],
-  "supreme_court_ruling": "The petition is GRANTED. The Court of Appeals decision is REVERSED and SET ASIDE, the NLRC decision is REINSTATED as modified, and Stradcom is ordered to pay Orpilla P30,000 in nominal damages.",
+  "supreme_court_ruling": "The petition is GRANTED. The Court of Appeals decision is REVERSED and SET ASIDE, the CDA Board ruling is NULLIFIED, and the Mediation-Arbitration Unit's ruling is REINSTATED. BPWC is ordered to reinstate Villanueva and to pay backwages, without prejudice to a disciplinary proceeding conducted with proper notice and hearing.",
   "class_notes": [
-    "The two requirements for loss of trust and confidence are a position of trust and an act justifying the loss.",
-    "A valid dismissal for just cause may still result in nominal damages when procedural due process is not observed."
+    "Membership in a cooperative is a property interest protected by due process; expulsion requires written notice and a hearing under Article 35, RA 9520.",
+    "A void expulsion leaves the member in the cooperative in contemplation of law, so reinstatement and backwages follow as of course."
   ]
 }
