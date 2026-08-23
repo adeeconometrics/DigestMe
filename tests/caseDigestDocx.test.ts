@@ -10,7 +10,7 @@ import {
 import type { CaseDigestIssueInput } from "../src/lib/caseDigestDocx";
 import { CASE_DIGEST_MOCK } from "../src/data/caseDigestMock";
 import { buildCaseDigest, buildFacts, buildIssue, buildIssuePair } from "./factories";
-import rawMockJson from "../dump/case-digest.mock.json";
+import rawMockJson from "./fixtures/case-digest.mock.json";
 
 // Section headings render uppercase (headingParagraph calls toUpperCase()).
 const SECTION_HEADINGS = [

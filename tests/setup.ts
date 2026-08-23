@@ -6,6 +6,14 @@ if (typeof globalThis.window === "undefined") {
   (globalThis as { window?: unknown }).window = globalThis;
 }
 
+// pdfjs-dist defines `Iterator.prototype.join` at module scope; the Iterator
+// global only exists on node 23+. A bare constructor supplies the
+// `.prototype` pdfjs extends, so pdf.js loads on node 20/22 (CI runs node 20).
+const globalWithIterator = globalThis as unknown as { Iterator?: unknown };
+if (typeof globalWithIterator.Iterator === "undefined") {
+  globalWithIterator.Iterator = function IteratorPolyfill() {};
+}
+
 // pdfjs-dist constructs `new DOMMatrix()` at module scope; node has no
 // DOMMatrix global. The stub carries the 2D affine fields pdfjs reads, which
 // is enough for the pure indexing math under test.
