@@ -1,13 +1,22 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   Footer,
   Header,
+  HeightRule,
   Packer,
   Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableLayoutType,
+  TableRow,
   TextRun,
+  VerticalAlignTable,
+  WidthType,
 } from "docx";
-import type { IParagraphOptions, ParagraphChild } from "docx";
+import type { FileChild, IParagraphOptions, ParagraphChild, TableVerticalAlign } from "docx";
 
 /** Facts are grouped to mirror the FACTS section in the case-digest template. */
 export interface CaseDigestFacts {
@@ -66,11 +75,60 @@ interface TextStyle {
   color?: string;
 }
 
+interface CellOptions {
+  fill?: string;
+  columnSpan?: number;
+  width?: number;
+  margins?: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+  };
+  verticalAlign?: TableVerticalAlign;
+}
+
 const BODY_FONT = "Arial";
 const BODY_SIZE = 20;
+const DARK_FILL = "666666";
+const LABEL_FILL = "d9d9d9";
+const SUBHEADER_FILL = "cccccc";
+const WHITE_FILL = "ffffff";
+const TABLE_WIDTH = 10466;
+const DETAILS_TABLE_WIDTH = 10455;
+const FACTS_TABLE_WIDTH = 10455;
+const ARGUMENTS_TABLE_WIDTH = 10440;
+const ISSUE_TABLE_WIDTH = 10440;
+const DETAILS_COLUMN_WIDTHS = [1845, 4590, 1695, 2325];
+const FACTS_COLUMN_WIDTHS = [1365, 9090];
+const ARGUMENTS_COLUMN_WIDTHS = [5235, 5205];
+const ISSUE_COLUMN_WIDTHS = [1455, 8985];
 const BODY_SPACING = { after: 120, line: 240, lineRule: "auto" as const };
-const SECTION_SPACING = { before: 240, after: 120, line: 240, lineRule: "auto" as const };
-const SUBHEADING_SPACING = { before: 160, after: 80, line: 240, lineRule: "auto" as const };
+const HEADING_SPACING = { after: 0, line: 192, lineRule: "auto" as const };
+const SUBHEADING_SPACING = { before: 120, after: 80, line: 240, lineRule: "auto" as const };
+const DETAILS_CELL_MARGINS = { top: 80, left: 80, bottom: 80, right: 80 };
+const CONTENT_CELL_MARGINS = { top: 100, left: 100, bottom: 100, right: 100 };
+const COMPACT_CELL_MARGINS = { top: 0, left: 108, bottom: 0, right: 108 };
+const ISSUE_CELL_MARGINS = { top: 99, left: 99, bottom: 99, right: 99 };
+const TABLE_BORDER = { style: BorderStyle.SINGLE, color: "000000", size: 8, space: 0 };
+const TABLE_BORDERS = {
+  top: TABLE_BORDER,
+  left: TABLE_BORDER,
+  bottom: TABLE_BORDER,
+  right: TABLE_BORDER,
+  insideHorizontal: TABLE_BORDER,
+  insideVertical: TABLE_BORDER,
+};
+const CELL_BORDERS = {
+  top: TABLE_BORDER,
+  left: TABLE_BORDER,
+  bottom: TABLE_BORDER,
+  right: TABLE_BORDER,
+};
+const JUSTIFIED_CELL_TEXT: IParagraphOptions = {
+  alignment: AlignmentType.JUSTIFIED,
+  spacing: BODY_SPACING,
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -192,27 +250,6 @@ function textParagraph(text: string, style: TextStyle = {}, options: IParagraphO
   return paragraph([textRun(text, style)], options);
 }
 
-function sectionHeading(title: string, first = false): Paragraph {
-  return textParagraph(title.toUpperCase(), { bold: true }, {
-    spacing: first ? { ...SECTION_SPACING, before: 0 } : SECTION_SPACING,
-    keepNext: true,
-  });
-}
-
-function subheading(title: string, italics = false): Paragraph {
-  return textParagraph(title, { bold: true, italics }, {
-    spacing: SUBHEADING_SPACING,
-    keepNext: true,
-  });
-}
-
-function fieldLabel(label: string): Paragraph {
-  return textParagraph(label, { bold: true }, {
-    spacing: { after: 40, line: 240, lineRule: "auto" },
-    keepNext: true,
-  });
-}
-
 function nonEmptyLines(text: string): string[] {
   return text
     .split(/\r?\n/)
@@ -228,41 +265,209 @@ function isBulletLine(text: string): boolean {
   return /^(?:[-*]|\u2022)\s+/.test(text);
 }
 
-function bulletParagraph(text: string, style: TextStyle = {}): Paragraph {
-  return paragraph([textRun(stripBullet(text), style)], { bullet: { level: 0 } });
+function bulletParagraph(
+  text: string,
+  style: TextStyle = {},
+  options: IParagraphOptions = {},
+): Paragraph {
+  return paragraph([textRun(stripBullet(text), style)], { ...options, bullet: { level: 0 } });
 }
 
-function contentParagraphs(text: string, style: TextStyle = {}): Paragraph[] {
+function contentParagraphs(
+  text: string,
+  style: TextStyle = {},
+  options: IParagraphOptions = {},
+): Paragraph[] {
   return nonEmptyLines(text).map((line) => (
-    isBulletLine(line) ? bulletParagraph(line, style) : textParagraph(line, style)
+    isBulletLine(line) ? bulletParagraph(line, style, options) : textParagraph(line, style, options)
   ));
 }
 
-function labelledBulletParagraph(text: string): Paragraph {
+function labelledBulletParagraph(text: string, options: IParagraphOptions = {}): Paragraph {
   const value = stripBullet(text);
   const separatorIndex = value.indexOf(":");
   if (separatorIndex <= 0) {
-    return bulletParagraph(value);
+    return bulletParagraph(value, {}, options);
   }
 
   return paragraph([
     textRun(value.slice(0, separatorIndex + 1), { bold: true }),
-    textRun(value.slice(separatorIndex + 1)),
-  ], { bullet: { level: 0 } });
+    textRun(value.slice(separatorIndex + 1), { bold: true }),
+  ], { ...options, bullet: { level: 0 } });
 }
 
-function listParagraphs(items: string[], labelled = false): Paragraph[] {
+function listParagraphs(
+  items: string[],
+  labelled = false,
+  options: IParagraphOptions = {},
+): Paragraph[] {
   return items.flatMap((item) => nonEmptyLines(item).map((line) => (
-    labelled ? labelledBulletParagraph(line) : bulletParagraph(line)
+    labelled ? labelledBulletParagraph(line, options) : bulletParagraph(line, {}, options)
   )));
 }
 
-function appendTextSection(children: Paragraph[], title: string, text: string): void {
-  children.push(sectionHeading(title), ...contentParagraphs(text));
+function subheading(title: string, italics = false): Paragraph {
+  return textParagraph(title, { bold: true, italics }, {
+    spacing: SUBHEADING_SPACING,
+    keepNext: true,
+  });
 }
 
-function appendListSection(children: Paragraph[], title: string, items: string[], labelled = false): void {
-  children.push(sectionHeading(title), ...listParagraphs(items, labelled));
+function headingParagraph(title: string): Paragraph {
+  return textParagraph(title.toUpperCase(), { bold: true, color: "ffffff" }, {
+    spacing: HEADING_SPACING,
+    keepNext: true,
+  });
+}
+
+function cell(children: readonly (Paragraph | Table)[], options: CellOptions = {}): TableCell {
+  return new TableCell({
+    children: children.length > 0 ? children : [textParagraph("")],
+    borders: CELL_BORDERS,
+    columnSpan: options.columnSpan,
+    margins: options.margins ?? CONTENT_CELL_MARGINS,
+    shading: options.fill ? { fill: options.fill, type: ShadingType.CLEAR } : undefined,
+    verticalAlign: options.verticalAlign,
+    width: options.width === undefined ? undefined : { size: options.width, type: WidthType.DXA },
+  });
+}
+
+function row(children: readonly TableCell[], height?: number): TableRow {
+  return new TableRow({
+    children,
+    ...(height === undefined ? {} : { height: { value: height, rule: HeightRule.ATLEAST } }),
+  });
+}
+
+function table(rows: readonly TableRow[], columnWidths: number[], width: number): Table {
+  return new Table({
+    rows,
+    width: { size: width, type: WidthType.DXA },
+    columnWidths,
+    layout: TableLayoutType.FIXED,
+    borders: TABLE_BORDERS,
+    indent: { size: 3, type: WidthType.DXA },
+  });
+}
+
+function headingCell(title: string, columnSpan?: number, margins = CONTENT_CELL_MARGINS): TableCell {
+  return cell([headingParagraph(title)], {
+    fill: DARK_FILL,
+    columnSpan,
+    margins,
+  });
+}
+
+function labelledCell(label: string, fill = LABEL_FILL): TableCell {
+  return cell([
+    textParagraph(label, { bold: true }, { spacing: { after: 0, line: 227, lineRule: "auto" } }),
+  ], { fill, margins: DETAILS_CELL_MARGINS });
+}
+
+function detailsValueCell(value: string): TableCell {
+  const paragraphs = contentParagraphs(value);
+  return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
+}
+
+function detailsTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Details", 4, DETAILS_CELL_MARGINS)]),
+    row([
+      labelledCell("Case Title"),
+      detailsValueCell(caseDigest.case_title),
+      labelledCell("Subject"),
+      detailsValueCell(caseDigest.subject),
+    ], 420),
+    row([
+      labelledCell("Petitioner"),
+      detailsValueCell(caseDigest.petitioner),
+      labelledCell("Ponente"),
+      detailsValueCell(caseDigest.ponente),
+    ], 345),
+    row([
+      labelledCell("Respondent"),
+      detailsValueCell(caseDigest.respondent),
+      labelledCell("GR No. | Date"),
+      detailsValueCell(caseDigest.gr_no_date),
+    ], 360),
+    row([
+      labelledCell("Topic & Subtopic"),
+      detailsValueCell(caseDigest.topic_subtopic),
+      labelledCell("Full Text"),
+      detailsValueCell(caseDigest.full_text),
+    ], 315),
+  ], DETAILS_COLUMN_WIDTHS, DETAILS_TABLE_WIDTH);
+}
+
+function summaryDoctrineTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Summary")]),
+    row([cell(contentParagraphs(caseDigest.summary, {}, JUSTIFIED_CELL_TEXT), { margins: COMPACT_CELL_MARGINS })]),
+    row([headingCell("Doctrine")]),
+    row([cell(contentParagraphs(caseDigest.doctrine, { bold: true }, JUSTIFIED_CELL_TEXT), { margins: COMPACT_CELL_MARGINS })]),
+  ], [TABLE_WIDTH], TABLE_WIDTH);
+}
+
+function provisionParagraphs(provisions: string): Paragraph[] {
+  const lines = nonEmptyLines(provisions);
+  if (lines.length === 0) {
+    return [];
+  }
+
+  return [
+    isBulletLine(lines[0])
+      ? bulletParagraph(lines[0], { bold: true }, JUSTIFIED_CELL_TEXT)
+      : textParagraph(lines[0], { bold: true }, JUSTIFIED_CELL_TEXT),
+    ...contentParagraphs(lines.slice(1).join("\n"), {}, JUSTIFIED_CELL_TEXT),
+  ];
+}
+
+function provisionsTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Provision/s")]),
+    row([cell(provisionParagraphs(caseDigest.provisions), { margins: COMPACT_CELL_MARGINS })]),
+  ], [TABLE_WIDTH], TABLE_WIDTH);
+}
+
+function factsTable(caseDigest: CaseDigest): Table {
+  const facts: Paragraph[] = listParagraphs(caseDigest.facts.petition, false, JUSTIFIED_CELL_TEXT);
+  if (caseDigest.facts.respondent_version !== undefined) {
+    facts.push(subheading("Respondent\u2019s version", true));
+    facts.push(...listParagraphs(caseDigest.facts.respondent_version, false, JUSTIFIED_CELL_TEXT));
+  }
+  if (caseDigest.facts.petitioner_version !== undefined) {
+    facts.push(subheading("Petitioners\u2019 version", true));
+    facts.push(...listParagraphs(caseDigest.facts.petitioner_version, false, JUSTIFIED_CELL_TEXT));
+  }
+
+  return table([
+    row([headingCell("Facts", 2, CONTENT_CELL_MARGINS)]),
+    row([
+      labelledCell("Petition", SUBHEADER_FILL),
+      cell([textParagraph("Why does this case exist?", {}, JUSTIFIED_CELL_TEXT)], { margins: CONTENT_CELL_MARGINS }),
+    ], 334),
+    row([cell(facts, { columnSpan: 2, margins: CONTENT_CELL_MARGINS })], 384),
+  ], FACTS_COLUMN_WIDTHS, FACTS_TABLE_WIDTH);
+}
+
+function argumentsTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([
+      headingCell("Petitioner\u2019s Arguments", undefined, CONTENT_CELL_MARGINS),
+      headingCell("Respondent\u2019s Arguments", undefined, CONTENT_CELL_MARGINS),
+    ], 349),
+    row([
+      cell(listParagraphs(caseDigest.petitioners_arguments, false, JUSTIFIED_CELL_TEXT), { margins: CONTENT_CELL_MARGINS }),
+      cell(listParagraphs(caseDigest.respondents_arguments, false, JUSTIFIED_CELL_TEXT), { margins: CONTENT_CELL_MARGINS }),
+    ], 870),
+  ], ARGUMENTS_COLUMN_WIDTHS, ARGUMENTS_TABLE_WIDTH);
+}
+
+function proceduralPostureTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Procedural Posture")]),
+    row([cell(listParagraphs(caseDigest.procedural_posture, true, JUSTIFIED_CELL_TEXT), { margins: COMPACT_CELL_MARGINS })], 1869),
+  ], [TABLE_WIDTH], TABLE_WIDTH);
 }
 
 function normalizeIssue(issue: CaseDigestIssueInput): CaseDigestIssue {
@@ -272,55 +477,66 @@ function normalizeIssue(issue: CaseDigestIssueInput): CaseDigestIssue {
   return issue;
 }
 
-function renderBody(caseDigest: CaseDigest): Paragraph[] {
-  const children: Paragraph[] = [sectionHeading("Details", true)];
-  const details: Array<[string, string]> = [
-    ["Case Title", caseDigest.case_title],
-    ["Subject", caseDigest.subject],
-    ["Petitioner", caseDigest.petitioner],
-    ["Ponente", caseDigest.ponente],
-    ["Respondent", caseDigest.respondent],
-    ["GR No. | Date", caseDigest.gr_no_date],
-    ["Topic & Subtopic", caseDigest.topic_subtopic],
-    ["Full Text", caseDigest.full_text],
-  ];
+function issueTable(caseDigest: CaseDigest): Table {
+  const rows: TableRow[] = [row([headingCell("Issue/s", 2, ISSUE_CELL_MARGINS)], 400)];
 
-  for (const [label, value] of details) {
-    children.push(fieldLabel(label));
-    const valueParagraphs = contentParagraphs(value);
-    children.push(...(valueParagraphs.length > 0 ? valueParagraphs : [textParagraph("")]));
-  }
-
-  appendTextSection(children, "Summary", caseDigest.summary);
-  appendTextSection(children, "Doctrine", caseDigest.doctrine);
-  appendTextSection(children, "Provision/s", caseDigest.provisions);
-
-  children.push(sectionHeading("Facts"), subheading("Petition"), subheading("Why does this case exist?", true));
-  children.push(...listParagraphs(caseDigest.facts.petition));
-  if (caseDigest.facts.respondent_version !== undefined) {
-    children.push(subheading("Respondent's version", true), ...listParagraphs(caseDigest.facts.respondent_version));
-  }
-  if (caseDigest.facts.petitioner_version !== undefined) {
-    children.push(subheading("Petitioners' version", true), ...listParagraphs(caseDigest.facts.petitioner_version));
-  }
-
-  appendListSection(children, "Petitioner's Arguments", caseDigest.petitioners_arguments);
-  appendListSection(children, "Respondent's Arguments", caseDigest.respondents_arguments);
-  appendListSection(children, "Procedural Posture", caseDigest.procedural_posture, true);
-
-  children.push(sectionHeading("Issue/s"));
   for (const issueInput of caseDigest.issues) {
     const issue = normalizeIssue(issueInput);
     if (issue.issue) {
-      children.push(...contentParagraphs(issue.issue));
+      rows.push(row([
+        cell(contentParagraphs(issue.issue, { bold: true }, JUSTIFIED_CELL_TEXT), {
+          fill: SUBHEADER_FILL,
+          columnSpan: 2,
+          margins: ISSUE_CELL_MARGINS,
+        }),
+      ], 366));
     }
-    children.push(subheading("RULING"), ...contentParagraphs(issue.ruling, { bold: true }));
-    children.push(subheading("RATIO"), ...contentParagraphs(issue.ratio));
+    rows.push(row([
+      headingCell("Ruling", undefined, ISSUE_CELL_MARGINS),
+      headingCell("Ratio", undefined, ISSUE_CELL_MARGINS),
+    ], 300));
+    rows.push(row([
+      cell(contentParagraphs(issue.ruling, { bold: true }, { alignment: AlignmentType.CENTER, spacing: BODY_SPACING }), {
+        fill: WHITE_FILL,
+        margins: ISSUE_CELL_MARGINS,
+        verticalAlign: VerticalAlignTable.CENTER,
+      }),
+      cell(contentParagraphs(issue.ratio, {}, JUSTIFIED_CELL_TEXT), {
+        fill: WHITE_FILL,
+        margins: ISSUE_CELL_MARGINS,
+      }),
+    ], 525));
   }
 
-  appendTextSection(children, "Supreme Court Ruling", caseDigest.supreme_court_ruling);
-  appendListSection(children, "Class Notes", caseDigest.class_notes);
-  return children;
+  return table(rows, ISSUE_COLUMN_WIDTHS, ISSUE_TABLE_WIDTH);
+}
+
+function supremeCourtRulingTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Supreme Court Ruling")]),
+    row([cell(contentParagraphs(caseDigest.supreme_court_ruling, { bold: true }, JUSTIFIED_CELL_TEXT), { margins: COMPACT_CELL_MARGINS })]),
+  ], [TABLE_WIDTH], TABLE_WIDTH);
+}
+
+function classNotesTable(caseDigest: CaseDigest): Table {
+  return table([
+    row([headingCell("Class Notes")]),
+    row([cell(listParagraphs(caseDigest.class_notes, false, JUSTIFIED_CELL_TEXT), { margins: COMPACT_CELL_MARGINS })]),
+  ], [TABLE_WIDTH], TABLE_WIDTH);
+}
+
+function renderBody(caseDigest: CaseDigest): FileChild[] {
+  return [
+    detailsTable(caseDigest),
+    summaryDoctrineTable(caseDigest),
+    provisionsTable(caseDigest),
+    factsTable(caseDigest),
+    argumentsTable(caseDigest),
+    proceduralPostureTable(caseDigest),
+    issueTable(caseDigest),
+    supremeCourtRulingTable(caseDigest),
+    classNotesTable(caseDigest),
+  ];
 }
 
 function headerFooterParagraph(text: string): Paragraph {
