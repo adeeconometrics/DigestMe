@@ -7,6 +7,7 @@ import documentSource from "../engine/document.py?raw";
 import schemasSource from "../engine/schemas.py?raw";
 import searchSource from "../engine/search.py?raw";
 import toolsSource from "../engine/tools.py?raw";
+import { PYODIDE_INDEX_URL } from "./artifactCache";
 
 interface WorkerRequest {
   requestId: number;
@@ -26,7 +27,6 @@ interface WorkerResponse {
 }
 
 const ENGINE_ROOT = "/tmp/digest-engine";
-const PYODIDE_INDEX_URL = "https://cdn.jsdelivr.net/pyodide/v314.0.5/full/";
 const ENGINE_SOURCES: Record<string, string> = {
   "__init__.py": initSource,
   "agent.py": agentSource,
