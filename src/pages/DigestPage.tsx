@@ -113,10 +113,10 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   // reload resets the engine. In-flight requests set their own "running" state.
   useEffect(
     () =>
-      subscribeEngineStatus((status) => {
+      subscribeEngineStatus((nextStatus) => {
         setAgentStatus((current) => {
-          if (status.state === "failed") return "failed";
-          if (status.state === "idle" && current === "failed") return "idle";
+          if (nextStatus.state === "failed") return "failed";
+          if (nextStatus.state === "idle" && current === "failed") return "idle";
           return current;
         });
       }),
