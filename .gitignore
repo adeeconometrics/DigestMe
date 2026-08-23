@@ -1,3 +1,15 @@
 node_modules/
 dist/
+AGENTS.md
+dump/*.docx
 .DS_Store
+
+dump/
+
+opencode.jsonc
+
+*.pdf
+*.docx
+*.csv
+coverage/
+semgrep-results.sarif

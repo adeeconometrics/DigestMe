@@ -1,10 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, RefObject } from "react";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
-import { getDecksWithStarter, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
-import type { AppView, CsvValidationResult, Deck, Flashcard, Rating, StudySession } from "./types";
+import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
+import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
+
+const DigestPage = lazy(() => import("./pages/DigestPage"));
+
+const VIEW_ROUTES: Record<AppView, string> = {
+  study: "#/study",
+  library: "#/library",
+  digest: "#/digest",
+};
+
+function viewFromHash(hash: string): AppView {
+  if (hash === "#/library") return "library";
+  if (hash === "#/digest") return "digest";
+  return "study";
+}
 
 interface ImportState {
   fileName: string;
@@ -61,11 +75,11 @@ export default function App() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [storageError, setStorageError] = useState("");
+  const [, setStorageError] = useState("");
   const [sessionHistory, setSessionHistory] = useState<StudySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [sessionStartedAt, setSessionStartedAt] = useState("");
-  const [view, setView] = useState<AppView>("study");
+  const [view, setView] = useState<AppView>(() => viewFromHash(window.location.hash));
   const [randomize, setRandomize] = useState(true);
   const [studyOrder, setStudyOrder] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -77,7 +91,51 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [renameState, setRenameState] = useState<{ deckId: string; name: string } | null>(null);
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("digestme-rail") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [openPanel, setOpenPanel] = useState<"sessions" | "decks" | null>(null);
+  const [sessionToken, setSessionToken] = useState(0);
+  const [focusDoc, setFocusDoc] = useState<{ id: string; nonce: number } | null>(null);
+  const [digestSessions, setDigestSessions] = useState<DocumentSummary[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function toggleRail(): void {
+    setRailCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        window.localStorage.setItem("digestme-rail", next ? "1" : "0");
+      } catch {
+        /* private mode: state still applies for this page load */
+      }
+      return next;
+    });
+  }
+
+  function refreshDigestSessions(): void {
+    void getDocumentSummaries()
+      .then(setDigestSessions)
+      .catch(() => setDigestSessions([]));
+  }
+
+  function togglePanel(panel: "sessions" | "decks"): void {
+    if (panel === "sessions") refreshDigestSessions();
+    setOpenPanel((current) => (current === panel ? null : panel));
+  }
+
+  function openSession(sessionId: string): void {
+    setView("digest");
+    setFocusDoc({ id: sessionId, nonce: Date.now() });
+  }
+
+  function beginDigestSession(): void {
+    setView("digest");
+    setSessionToken((token) => token + 1);
+  }
 
   const activeDeck = decks.find((deck) => deck.id === activeDeckId);
   const currentCardId = studyOrder[currentIndex];
@@ -138,6 +196,19 @@ export default function App() {
     const timeout = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  // Keep the URL hash mapped to the active view so views are linkable
+  // while the app stays fully static.
+  useEffect(() => {
+    const route = VIEW_ROUTES[view];
+    if (window.location.hash !== route) window.history.replaceState(null, "", route);
+  }, [view]);
+
+  useEffect(() => {
+    const handleHashChange = (): void => setView(viewFromHash(window.location.hash));
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   function openImporter() {
     setImportState(null);
@@ -357,19 +428,26 @@ export default function App() {
   }, [currentCard, isComplete, isFlipped, isImporterOpen, view]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${railCollapsed ? "has-rail" : ""}`}>
       <Sidebar
         activeDeckId={activeDeckId}
+        collapsed={railCollapsed}
         decks={decks}
         onDeleteDeck={deleteDeck}
         onImport={openImporter}
+        onNewSession={beginDigestSession}
+        onOpenSession={openSession}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
+        onToggleCollapse={toggleRail}
+        onTogglePanel={togglePanel}
+        openPanel={openPanel}
+        sessions={digestSessions}
         view={view}
       />
 
       <main className="main-content">
-        <header className="topbar">
+        <header className="mobile-topbar">
           <div className="mobile-brand">
             <span className="brand-mark"><Icon name="spark" size={17} /></span>
             <span>Digest Me</span>
@@ -383,19 +461,6 @@ export default function App() {
           >
             <Icon name="menu" size={20} />
           </button>
-          <div className="breadcrumbs">
-            <span>workspace</span>
-            <Icon name="chevron-right" size={13} />
-            <span>{view === "study" ? "study desk" : "deck library"}</span>
-          </div>
-          <div className="topbar-actions">
-            <div className={`local-badge ${storageError ? "has-error" : ""}`} title={storageError || "Your collection is stored in IndexedDB on this device."}><span className="status-dot" /> {storageError ? "memory fallback" : "IndexedDB storage"}</div>
-            <button aria-label="Import CSV" className="primary-button compact" onClick={openImporter} type="button">
-              <Icon name="upload" size={16} />
-              <span>Import CSV</span>
-            </button>
-            <div aria-label="Your study space" className="avatar">DS</div>
-          </div>
           {mobileMenuOpen && (
             <MobileMenu
               activeDeckId={activeDeckId}
@@ -432,6 +497,10 @@ export default function App() {
             setRandomize={setRandomize}
             totalDeckCards={studyOrder.length}
           />
+        ) : view === "digest" ? (
+          <Suspense fallback={<div className="loading-workspace"><span className="loading-orbit"><Icon name="spark" size={20} /></span><strong>Loading the digest bench...</strong><small>Preparing the local PDF parser</small></div>}>
+            <DigestPage focusDoc={focusDoc} sessionToken={sessionToken} />
+          </Suspense>
         ) : (
           <LibraryView
             activeDeckId={activeDeckId}
@@ -478,17 +547,49 @@ export default function App() {
 
 interface SidebarProps {
   activeDeckId: string | null;
+  collapsed: boolean;
   decks: Deck[];
+  openPanel: "sessions" | "decks" | null;
+  sessions: DocumentSummary[];
   view: AppView;
   onSetView: (view: AppView) => void;
+  onToggleCollapse: () => void;
+  onTogglePanel: (panel: "sessions" | "decks") => void;
+  onOpenSession: (sessionId: string) => void;
+  onNewSession: () => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
 }
 
-function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, onSetView, view }: SidebarProps) {
+function Sidebar({
+  activeDeckId,
+  collapsed,
+  decks,
+  onDeleteDeck,
+  onImport,
+  onNewSession,
+  onOpenSession,
+  onSelectDeck,
+  onSetView,
+  onToggleCollapse,
+  onTogglePanel,
+  openPanel,
+  sessions,
+  view,
+}: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? "is-rail" : ""}`}>
+      <button
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="rail-toggle"
+        onClick={onToggleCollapse}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        type="button"
+      >
+        <Icon name="chevron-left" size={15} />
+      </button>
       <div className="brand-lockup">
         <span className="brand-mark"><Icon name="spark" size={18} /></span>
         <span className="brand-word">Digest Me</span>
@@ -496,36 +597,83 @@ function Sidebar({ activeDeckId, decks, onDeleteDeck, onImport, onSelectDeck, on
 
       <div className="sidebar-label">workspace</div>
       <nav className="main-nav">
-        <button className={`nav-item ${view === "study" ? "active" : ""}`} onClick={() => onSetView("study")} type="button">
+        <button
+          className={`nav-item ${view === "study" ? "active" : ""}`}
+          onClick={() => onSetView("study")}
+          title={collapsed ? "Study desk" : undefined}
+          type="button"
+        >
           <Icon name="book" size={18} />
           <span>Study desk</span>
           {activeDeckId && <span className="nav-indicator" />}
         </button>
-        <button className={`nav-item ${view === "library" ? "active" : ""}`} onClick={() => onSetView("library")} type="button">
+
+        <button
+          className={`nav-item nav-trigger ${openPanel === "sessions" ? "is-open" : ""} ${view === "digest" ? "active" : ""}`}
+          onClick={() => {
+            onSetView("digest");
+            if (!collapsed) onTogglePanel("sessions");
+          }}
+          title={collapsed ? "Case digest" : undefined}
+          type="button"
+        >
+          <Icon name="tree" size={18} />
+          <span>Case digest</span>
+          <Icon className="panel-caret" name="chevron-down" size={14} />
+        </button>
+        {!collapsed && openPanel === "sessions" && (
+          <div className="sub-panel">
+            {sessions.length ? sessions.map((session) => (
+              <button className="sub-item" key={session.id} onClick={() => onOpenSession(session.id)} type="button">
+                <Icon name="tree" size={13} />
+                <span>{session.fileName}</span>
+              </button>
+            )) : (
+              <p className="sub-empty">No digested documents yet.</p>
+            )}
+            <button className="sub-item sub-new" onClick={onNewSession} type="button">
+              <Icon name="plus" size={13} />
+              <span>New session</span>
+            </button>
+          </div>
+        )}
+
+        <button
+          className={`nav-item nav-trigger ${openPanel === "decks" ? "is-open" : ""} ${view === "library" ? "active" : ""}`}
+          onClick={() => {
+            onSetView("library");
+            if (!collapsed) onTogglePanel("decks");
+          }}
+          title={collapsed ? "Deck library" : undefined}
+          type="button"
+        >
           <Icon name="grid" size={18} />
           <span>Deck library</span>
-          <span className="nav-count">{decks.length}</span>
+          <Icon className="panel-caret" name="chevron-down" size={14} />
         </button>
+        {!collapsed && openPanel === "decks" && (
+          <div className="sub-panel">
+            {decks.map((deck, index) => (
+              <div className={`sub-row ${activeDeckId === deck.id ? "active" : ""}`} key={deck.id}>
+                <button className="sub-item" onClick={() => onSelectDeck(deck.id)} type="button">
+                  <span className={`deck-dot dot-${index % 4}`} />
+                  <span>{deck.name}</span>
+                </button>
+                <button aria-label={`Remove ${deck.name}`} className="sub-remove" onClick={() => onDeleteDeck(deck.id)} type="button">
+                  <Icon name="trash" size={12} />
+                </button>
+              </div>
+            ))}
+            {decks.length === 0 && <p className="sub-empty">No decks yet.</p>}
+            <button className="sub-item sub-new" onClick={onImport} type="button">
+              <Icon name="plus" size={13} />
+              <span>New deck</span>
+            </button>
+          </div>
+        )}
       </nav>
 
-      <div className="sidebar-label deck-label-row">
-        <span>your decks</span>
-        <button aria-label="Import a deck" className="sidebar-add" onClick={onImport} type="button"><Icon name="plus" size={15} /></button>
-      </div>
-      <div className="deck-list">
-        {decks.slice(0, 5).map((deck, index) => (
-          <div className={`deck-list-row ${activeDeckId === deck.id ? "selected" : ""}`} key={deck.id}>
-            <button className="deck-list-button" onClick={() => onSelectDeck(deck.id)} type="button">
-              <span className={`deck-dot dot-${index % 4}`} />
-              <span className="deck-list-copy"><strong>{deck.name}</strong><small>{deck.cards.length} cards</small></span>
-            </button>
-            <button aria-label={`Remove ${deck.name}`} className="deck-delete" onClick={() => onDeleteDeck(deck.id)} type="button"><Icon name="more" size={16} /></button>
-          </div>
-        ))}
-        {decks.length > 5 && <button className="show-all-button" onClick={() => onSetView("library")} type="button">View all decks <Icon name="arrow-right" size={14} /></button>}
-      </div>
-
-      <button className="import-prompt" onClick={onImport} type="button">
+      <button className="import-prompt" onClick={onImport} title={collapsed ? "Bring your own — drop in a CSV deck" : undefined} type="button">
         <span className="import-prompt-icon"><Icon name="upload" size={17} /></span>
         <span><strong>Bring your own</strong><small>Drop in a CSV deck</small></span>
         <Icon className="prompt-arrow" name="arrow-right" size={16} />
@@ -555,6 +703,7 @@ function MobileMenu({ activeDeckId, decks, onImport, onSelectDeck, onSetView, vi
     <div className="mobile-menu-panel">
       <div className="mobile-nav-links">
         <button className={`nav-item ${view === "study" ? "active" : ""}`} onClick={() => onSetView("study")} type="button"><Icon name="book" size={17} /> Study desk</button>
+        <button className={`nav-item ${view === "digest" ? "active" : ""}`} onClick={() => onSetView("digest")} type="button"><Icon name="tree" size={17} /> Case digest</button>
         <button className={`nav-item ${view === "library" ? "active" : ""}`} onClick={() => onSetView("library")} type="button"><Icon name="grid" size={17} /> Deck library <span className="nav-count">{decks.length}</span></button>
       </div>
       <div className="mobile-deck-heading">your decks</div>

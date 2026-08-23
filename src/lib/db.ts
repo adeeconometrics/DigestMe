@@ -1,12 +1,30 @@
 import { STARTER_DECK } from "../data/starter";
-import type { Deck, StudySession } from "../types";
+import type { ParsedDocument } from "../parser";
+import { flattenTree } from "../parser";
+import type { Deck, DocumentSummary, StudySession } from "../types";
 
 const DATABASE_NAME = "recall-studio";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 3;
 const DECK_STORE = "decks";
 const SESSION_STORE = "sessions";
 const META_STORE = "meta";
+const DOCUMENT_STORE = "documents";
+const DOCUMENT_FILE_STORE = "documentFiles";
 const STARTER_SEEDED_KEY = "starter-seeded";
+
+/** The PDF source bytes that must accompany every stored document tree. */
+export interface StoredDocumentFile {
+  id: string;
+  mimeType: string;
+  fileName: string;
+  blob: Blob;
+}
+
+/** A parsed tree together with the PDF bytes it was derived from. */
+export interface DocumentWithSource {
+  document: ParsedDocument;
+  file: StoredDocumentFile;
+}
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -32,6 +50,29 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!database.objectStoreNames.contains(META_STORE)) {
         database.createObjectStore(META_STORE, { keyPath: "key" });
+      }
+      if (!database.objectStoreNames.contains(DOCUMENT_STORE)) {
+        database.createObjectStore(DOCUMENT_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(DOCUMENT_FILE_STORE)) {
+        database.createObjectStore(DOCUMENT_FILE_STORE, { keyPath: "id" });
+        // Enforce the invariant "no document tree without its PDF source":
+        // trees stored before blobs were tracked cannot be referenced anymore.
+        const upgradeTransaction = request.transaction;
+        if (upgradeTransaction) {
+          const files = upgradeTransaction.objectStore(DOCUMENT_FILE_STORE);
+          const documents = upgradeTransaction.objectStore(DOCUMENT_STORE);
+          const cursorRequest = documents.openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const hasFile = files.count(cursor.primaryKey);
+            hasFile.onsuccess = () => {
+              if (hasFile.result === 0) cursor.delete();
+              cursor.continue();
+            };
+          };
+        }
       }
     };
 
@@ -115,4 +156,84 @@ export async function removeSessionsForDeck(deckId: string): Promise<void> {
       cursor.continue();
     };
   });
+}
+
+/**
+ * Persists a parsed tree and its PDF source bytes in a single transaction,
+ * guaranteeing the invariant: there is never a document tree without its blob.
+ */
+export async function putDocumentWithFile(document: ParsedDocument, file: File): Promise<void> {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([DOCUMENT_STORE, DOCUMENT_FILE_STORE], "readwrite");
+    const record: StoredDocumentFile = {
+      id: document.id,
+      fileName: file.name,
+      mimeType: file.type || "application/pdf",
+      blob: file,
+    };
+    transaction.objectStore(DOCUMENT_STORE).put(document);
+    transaction.objectStore(DOCUMENT_FILE_STORE).put(record);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
+  });
+}
+
+export async function getDocument(documentId: string): Promise<ParsedDocument | undefined> {
+  const database = await openDatabase();
+  return requestValue<ParsedDocument | undefined>(
+    database.transaction(DOCUMENT_STORE, "readonly").objectStore(DOCUMENT_STORE).get(documentId),
+  );
+}
+
+/** Loads the tree together with the PDF bytes it references. */
+export async function getDocumentWithSource(documentId: string): Promise<DocumentWithSource | undefined> {
+  const database = await openDatabase();
+  const transaction = database.transaction([DOCUMENT_STORE, DOCUMENT_FILE_STORE], "readonly");
+  const [document, file] = await Promise.all([
+    requestValue<ParsedDocument | undefined>(transaction.objectStore(DOCUMENT_STORE).get(documentId)),
+    requestValue<StoredDocumentFile | undefined>(transaction.objectStore(DOCUMENT_FILE_STORE).get(documentId)),
+  ]);
+  return document && file ? { document, file } : undefined;
+}
+
+export async function getDocumentFile(documentId: string): Promise<StoredDocumentFile | undefined> {
+  const database = await openDatabase();
+  return requestValue<StoredDocumentFile | undefined>(
+    database.transaction(DOCUMENT_FILE_STORE, "readonly").objectStore(DOCUMENT_FILE_STORE).get(documentId),
+  );
+}
+
+/** Removes the tree and its PDF source atomically. */
+export async function removeDocument(documentId: string): Promise<void> {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([DOCUMENT_STORE, DOCUMENT_FILE_STORE], "readwrite");
+    transaction.objectStore(DOCUMENT_STORE).delete(documentId);
+    transaction.objectStore(DOCUMENT_FILE_STORE).delete(documentId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
+  });
+}
+
+/** Returns parsed documents newest-first. */
+export async function getDocuments(): Promise<ParsedDocument[]> {
+  const database = await openDatabase();
+  const documents = await requestValue<ParsedDocument[]>(database.transaction(DOCUMENT_STORE, "readonly").objectStore(DOCUMENT_STORE).getAll());
+  return documents.sort((left, right) => right.parsedAt.localeCompare(left.parsedAt));
+}
+
+/** Listing entries without shipping every tree to the UI at once. */
+export async function getDocumentSummaries(): Promise<DocumentSummary[]> {
+  const documents = await getDocuments();
+  return documents.map((document) => ({
+    id: document.id,
+    fileName: document.fileName,
+    parsedAt: document.parsedAt,
+    pageCount: document.metrics.pageCount,
+    pdfType: document.metrics.pdfType,
+    nodeCount: flattenTree(document.root).length,
+  }));
 }

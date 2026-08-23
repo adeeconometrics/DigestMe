@@ -6,6 +6,7 @@ export type IconName =
   | "cards"
   | "check"
   | "chevron-down"
+  | "chevron-left"
   | "chevron-right"
   | "close"
   | "clock"
@@ -21,6 +22,7 @@ export type IconName =
   | "shuffle"
   | "spark"
   | "trash"
+  | "tree"
   | "upload";
 
 interface IconProps {
@@ -38,6 +40,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: 
     cards: <><rect x="5" y="5" width="13" height="15" rx="2" /><path d="M8 2h9a2 2 0 0 1 2 2v14" /><path d="M9 10h5" /><path d="M9 14h3" /></>,
     check: <path d="m5 12 4.2 4.2L19.5 6" />,
     "chevron-down": <path d="m6 9 6 6 6-6" />,
+    "chevron-left": <path d="m15 18-6-6 6-6" />,
     "chevron-right": <path d="m9 6 6 6-6 6" />,
     close: <><path d="m6 6 12 12" /><path d="m18 6-12 12" /></>,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,
@@ -53,6 +56,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: 
     shuffle: <><path d="M3 7h2.5c3.5 0 5 10 9 10H21" /><path d="m18 14 3 3-3 3" /><path d="M3 17h2.5c1 0 1.8-.7 2.5-1.7" /><path d="M14.5 8.7C15.2 7.7 16 7 17 7h4" /><path d="m18 4 3 3-3 3" /></>,
     spark: <><path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7L12 2Z" /><path d="m19 17 .7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7L19 17Z" /></>,
     trash: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="m7 7 .8 13h8.4L17 7" /><path d="M10 11v5M14 11v5" /></>,
+    tree: <><circle cx="12" cy="4.5" r="2" /><circle cx="5.5" cy="19.5" r="2" /><circle cx="18.5" cy="19.5" r="2" /><path d="M12 6.5V12" /><path d="m12 12-5.4 5.8" /><path d="m12 12 5.4 5.8" /></>,
     upload: <><path d="M12 16V4" /><path d="m7 9 5-5 5 5" /><path d="M5 15v4h14v-4" /></>,
   };
 
