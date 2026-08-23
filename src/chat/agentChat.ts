@@ -61,6 +61,12 @@ export function formatExecutionTime(elapsedMs: number): string {
   return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+export function formatExecutionTimestamp(timestamp: number): string {
+  return new Date(timestamp).toISOString().replace("T", " ").replace(".000Z", " UTC").replace("Z", " UTC");
+}
+
 export function executionDescription(execution: AgentExecution): string {
-  return `Model: ${execution.model}. Execution time: ${formatExecutionTime(execution.elapsedMs)}.`;
+  const start = execution.startedAt === undefined ? "" : ` Started: ${formatExecutionTimestamp(execution.startedAt)}.`;
+  const end = execution.endedAt === undefined ? "" : ` Ended: ${formatExecutionTimestamp(execution.endedAt)}.`;
+  return `Model: ${execution.model}. Execution time: ${formatExecutionTime(execution.elapsedMs)}.${start}${end}`;
 }
