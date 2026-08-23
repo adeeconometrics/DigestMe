@@ -1848,6 +1848,55 @@ input:focus-visible,
   font-size: 11px;
 }
 
+.docx-preview-backdrop {
+  z-index: 40;
+  padding: 26px;
+}
+
+.docx-preview-dialog {
+  display: flex;
+  width: min(100%, 940px);
+  max-height: min(820px, calc(100vh - 52px));
+  flex-direction: column;
+  padding: 26px 28px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 23px;
+  background: var(--paper-bright);
+  box-shadow: 0 28px 68px rgba(11, 27, 25, 0.28);
+  animation: dialog-in 320ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.docx-preview-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 18px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #d7dbd2;
+}
+
+.docx-preview-status {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  padding: 30px;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+
+.docx-preview-status.is-error {
+  color: #b4523a;
+}
+
+.docx-preview-dialog .dialog-footer {
+  margin-top: 17px;
+}
+
+.docx-preview-dialog .digest-doc-wrapper {
+  padding-bottom: 30px;
+}
+
 .rename-field {
   margin-top: 28px;
 }
@@ -3191,7 +3240,28 @@ input:focus-visible,
 }
 
 .digest-download-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 11px;
+}
+
+.digest-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: var(--lime);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 700;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.digest-preview:hover {
+  background: #e3fb87;
+  transform: translateY(-1px);
 }
 
 .digest-download {
@@ -3199,18 +3269,19 @@ input:focus-visible,
   align-items: center;
   gap: 7px;
   padding: 7px 10px;
-  border: 1px solid rgba(184, 216, 86, 0.7);
+  border: 1px solid var(--line);
   border-radius: 9px;
-  background: rgba(218, 250, 113, 0.28);
-  color: var(--ink);
+  background: transparent;
+  color: var(--ink-soft);
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: none;
-  transition: background 140ms ease, transform 140ms ease;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
 }
 
 .digest-download:hover {
-  background: rgba(218, 250, 113, 0.55);
+  background: var(--paper-deep);
+  color: var(--ink);
   transform: translateY(-1px);
 }
 
