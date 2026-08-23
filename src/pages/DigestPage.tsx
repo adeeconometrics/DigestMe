@@ -1,17 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
 import { getDocumentWithSource, putDocumentWithFile } from "../lib/db";
 import type { StoredDocumentFile } from "../lib/db";
+import { caseDigestFileName, renderCaseDigestDocx } from "../lib/caseDigestDocx";
+import type { CaseDigest } from "../lib/caseDigestDocx";
+import { caseDigestToMarkdown } from "../lib/caseDigestMarkdown";
+import { getAgentRuntimeCredentials } from "../lib/agentSettings";
 import { flattenTree, isPdfFile, parsePdf } from "../parser";
 import type { DocumentNode, ParsedDocument } from "../parser";
+import { referencesForAnswer, executionDescription, formatExecutionTime, mapAgentReferences } from "../chat/agentChat";
 import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
+import { runCaseDigestAgent, runChatAgent } from "../pyodide/engineLoader";
+import type { AgentExecution } from "../pyodide/types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 
 type DigestStatus = "idle" | "parsing" | "error";
+type AgentStatus = "idle" | "running";
 
 interface ChatMessageBase {
   id: string;
@@ -33,7 +43,24 @@ type ChatMessage =
       ms: number;
       pdfType: string;
     })
-  | (ChatMessageBase & { role: "assistant"; kind: "references"; query: string; refs: RetrievalHit[] });
+  | (ChatMessageBase & { role: "assistant"; kind: "references"; query: string; refs: RetrievalHit[] })
+  | (ChatMessageBase & {
+      role: "assistant";
+      kind: "agent-answer";
+      markdown: string;
+      refs: RetrievalHit[];
+      execution: AgentExecution;
+    })
+  | (ChatMessageBase & {
+      role: "assistant";
+      kind: "digest";
+      markdown: string;
+      digest: CaseDigest;
+      refs: RetrievalHit[];
+      execution: AgentExecution;
+      docxUrl: string;
+      docxFileName: string;
+    });
 
 function makeMessageId(): string {
   const randomId = globalThis.crypto?.randomUUID?.();
@@ -58,11 +85,14 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
   const [draft, setDraft] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const agentRequestRef = useRef(0);
+  const docxUrlsRef = useRef<Set<string>>(new Set());
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -79,14 +109,20 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
+  useEffect(() => () => {
+    for (const url of docxUrlsRef.current) URL.revokeObjectURL(url);
+  }, []);
+
   // Sidebar "New session": clear the thread and selection.
   const firstSessionToken = useRef(sessionToken);
   useEffect(() => {
     if (sessionToken === firstSessionToken.current) return;
+    agentRequestRef.current += 1;
     setSelected(null);
     setSelectedFile(null);
     setSelectedNodeId(null);
     setStatus("idle");
+    setAgentStatus("idle");
     setMessages([welcomeMessage()]);
   }, [sessionToken]);
 
@@ -104,6 +140,8 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   }, [pushMessage]);
 
   function openSession(parsed: ParsedDocument, file: StoredDocumentFile): void {
+    agentRequestRef.current += 1;
+    setAgentStatus("idle");
     setSelected(parsed);
     setSelectedFile(file);
     setSelectedNodeId(null);
@@ -155,6 +193,8 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
 
   async function handleSelect(summaryId: string): Promise<void> {
     if (selected?.id === summaryId) return;
+    agentRequestRef.current += 1;
+    setAgentStatus("idle");
     try {
       const source = await getDocumentWithSource(summaryId);
       if (source) {
@@ -181,22 +221,111 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     }
   }
 
-  /** Local retrieval: answers questions with references into the parsed tree. */
-  function handleAsk(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const question = draft.trim();
-    if (!question) return;
-    setDraft("");
+  function isDigestCommand(question: string): boolean {
+    return question.trim().toLowerCase() === "/digest";
+  }
 
+  async function submitQuestion(rawQuestion: string): Promise<void> {
+    if (status === "parsing" || agentStatus === "running") return;
+    const question = rawQuestion.trim();
+    if (!question) return;
+    const requestId = ++agentRequestRef.current;
+    const selectedDocument = selected;
+
+    setDraft("");
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: question });
 
-    if (!selected) {
+    if (!selectedDocument) {
       pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "nudge" });
       return;
     }
 
-    const refs = retrieveNodes(selected.root, question, 3);
-    pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "references", query: question, refs });
+    const credentials = await getAgentRuntimeCredentials().catch(() => null);
+    if (requestId !== agentRequestRef.current) return;
+
+    if (isDigestCommand(question)) {
+      if (!credentials) {
+        pushError("Save an OpenRouter model and API key in Settings before running /digest.");
+        return;
+      }
+
+      setAgentStatus("running");
+      try {
+        const result = await runCaseDigestAgent(selectedDocument.root, credentials);
+        if (requestId !== agentRequestRef.current) return;
+
+        const markdown = caseDigestToMarkdown(result.digest);
+        const docxBlob = await renderCaseDigestDocx(result.digest);
+        if (requestId !== agentRequestRef.current) return;
+        const docxUrl = URL.createObjectURL(docxBlob);
+        docxUrlsRef.current.add(docxUrl);
+        pushMessage({
+          id: makeMessageId(),
+          at: new Date().toISOString(),
+          role: "assistant",
+          kind: "digest",
+          markdown,
+          digest: result.digest,
+          refs: mapAgentReferences(selectedDocument.root, result.references),
+          execution: { model: result.model, elapsedMs: result.elapsedMs },
+          docxUrl,
+          docxFileName: caseDigestFileName(result.digest.case_title),
+        });
+      } catch (error) {
+        if (requestId === agentRequestRef.current) {
+          pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
+        }
+      } finally {
+        if (requestId === agentRequestRef.current) setAgentStatus("idle");
+      }
+      return;
+    }
+
+    if (!credentials) {
+      pushMessage({
+        id: makeMessageId(),
+        at: new Date().toISOString(),
+        role: "assistant",
+        kind: "references",
+        query: question,
+        refs: retrieveNodes(selectedDocument.root, question, 3),
+      });
+      return;
+    }
+
+    setAgentStatus("running");
+    try {
+      const result = await runChatAgent(selectedDocument.root, question, credentials);
+      if (requestId !== agentRequestRef.current) return;
+      pushMessage({
+        id: makeMessageId(),
+        at: new Date().toISOString(),
+        role: "assistant",
+        kind: "agent-answer",
+        markdown: result.markdown,
+        refs: referencesForAnswer(selectedDocument.root, result.references, question),
+        execution: { model: result.model, elapsedMs: result.elapsedMs },
+      });
+    } catch (error) {
+      if (requestId !== agentRequestRef.current) return;
+      pushError(error instanceof Error ? `Agent unavailable. ${error.message} Showing local matches instead.` : "Agent unavailable. Showing local matches instead.");
+      pushMessage({
+        id: makeMessageId(),
+        at: new Date().toISOString(),
+        role: "assistant",
+        kind: "references",
+        query: question,
+        refs: retrieveNodes(selectedDocument.root, question, 3),
+      });
+    } finally {
+      if (requestId === agentRequestRef.current) setAgentStatus("idle");
+    }
+  }
+
+  /** Answer a question or execute the default /digest quick action. */
+  function handleAsk(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    void submitQuestion(draft);
   }
 
   function handleReferenceClick(hit: RetrievalHit): void {
@@ -207,6 +336,8 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   function handleGraphNodeSelect(node: { id: string }): void {
     setSelectedNodeId(node.id);
   }
+
+  const isBusy = status === "parsing" || agentStatus === "running";
 
   return (
     <div
@@ -244,30 +375,52 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
           ))}
         </div>
 
-        <form className="chat-composer" onSubmit={handleAsk}>
-          <input accept=".pdf,application/pdf" className="visually-hidden" onChange={handleFileChange} ref={fileInputRef} type="file" />
-          <button
-            aria-label="Attach a PDF"
-            className={`composer-attach ${status === "parsing" ? "is-busy" : ""}`}
-            disabled={status === "parsing"}
-            onClick={() => fileInputRef.current?.click()}
-            title={status === "parsing" ? "Parsing on-device..." : "Attach a PDF"}
-            type="button"
-          >
-            <Icon name="upload" size={17} />
-          </button>
-          <input
-            aria-label="Ask about the document"
-            autoComplete="off"
-            className="composer-input"
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={selected ? "Ask about this document..." : "Attach a PDF, then ask away..."}
-            value={draft}
-          />
-          <button aria-label="Send question" className="composer-send" disabled={!draft.trim()} type="submit">
-            <Icon name="arrow-right" size={17} />
-          </button>
-        </form>
+        <div className="chat-composer-shell">
+          {agentStatus === "running" && (
+            <div className="agent-progress" role="status">
+              <span className="agent-progress-dot" />
+              Reading the document with the case-digest agent...
+            </div>
+          )}
+          <div className="chat-quick-actions">
+            <button
+              className="quick-action"
+              disabled={!selected || isBusy}
+              onClick={() => void submitQuestion("/digest")}
+              title={selected ? "Generate a structured case digest" : "Attach a PDF first"}
+              type="button"
+            >
+              <Icon name="spark" size={13} />
+              <strong>/digest</strong>
+              <span>case digest</span>
+            </button>
+          </div>
+          <form className="chat-composer" onSubmit={handleAsk}>
+            <input accept=".pdf,application/pdf" className="visually-hidden" onChange={handleFileChange} ref={fileInputRef} type="file" />
+            <button
+              aria-label="Attach a PDF"
+              className={`composer-attach ${status === "parsing" ? "is-busy" : ""}`}
+              disabled={isBusy}
+              onClick={() => fileInputRef.current?.click()}
+              title={status === "parsing" ? "Parsing on-device..." : "Attach a PDF"}
+              type="button"
+            >
+              <Icon name="upload" size={17} />
+            </button>
+            <input
+              aria-label="Ask about the document"
+              autoComplete="off"
+              className="composer-input"
+              disabled={isBusy}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={selected ? "Ask about this document or type /digest..." : "Attach a PDF, then ask away..."}
+              value={draft}
+            />
+            <button aria-label="Send question" className="composer-send" disabled={!draft.trim() || isBusy} type="submit">
+              <Icon name="arrow-right" size={17} />
+            </button>
+          </form>
+        </div>
       </section>
 
       {selected && selectedFile ? (
@@ -355,19 +508,75 @@ function ChatBubble({ message, onReferenceClick }: ChatBubbleProps) {
             <>
               <p>I found {message.refs.length} matching passage{message.refs.length === 1 ? "" : "s"}:</p>
               <div className="reference-list">
-                {message.refs.map((ref) => (
-                  <button className="reference-item" key={ref.nodeId} onClick={() => onReferenceClick(ref)} type="button">
-                    <span className="reference-copy">{ref.snippet}</span>
-                    <span className="reference-meta">({ref.section || "root"} · p{ref.page ?? "?"})</span>
-                  </button>
-                ))}
+                <ReferenceList refs={message.refs} onReferenceClick={onReferenceClick} />
               </div>
             </>
           ) : (
             <p>No passages matched that. Try different words from the document.</p>
           )
         )}
+        {message.kind === "agent-answer" && (
+          <>
+            <MarkdownBody markdown={message.markdown} />
+            <AgentExecutionMeta execution={message.execution} />
+            {message.refs.length > 0 && (
+              <div className="agent-references">
+                <p className="reference-heading">Sources highlighted in the document tree</p>
+                <ReferenceList refs={message.refs} onReferenceClick={onReferenceClick} />
+              </div>
+            )}
+          </>
+        )}
+        {message.kind === "digest" && (
+          <>
+            <MarkdownBody markdown={message.markdown} />
+            <div className="digest-download-row">
+              <a className="digest-download" download={message.docxFileName} href={message.docxUrl}>
+                <Icon name="book" size={14} /> Download DOCX
+              </a>
+            </div>
+            <AgentExecutionMeta execution={message.execution} />
+            {message.refs.length > 0 && (
+              <div className="agent-references">
+                <p className="reference-heading">Sources highlighted in the document tree</p>
+                <ReferenceList refs={message.refs} onReferenceClick={onReferenceClick} />
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+interface ReferenceListProps {
+  refs: RetrievalHit[];
+  onReferenceClick: (hit: RetrievalHit) => void;
+}
+
+function ReferenceList({ refs, onReferenceClick }: ReferenceListProps) {
+  return refs.map((ref) => (
+    <button className="reference-item" key={ref.nodeId} onClick={() => onReferenceClick(ref)} type="button">
+      <span className="reference-copy">{ref.snippet}</span>
+      <span className="reference-meta">({ref.kind} · {ref.section || "root"} · p{ref.page ?? "?"})</span>
+    </button>
+  ));
+}
+
+function MarkdownBody({ markdown }: { markdown: string }) {
+  const html = DOMPurify.sanitize(marked.parse(markdown, { breaks: true, gfm: true, async: false }));
+  return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function AgentExecutionMeta({ execution }: { execution: AgentExecution }) {
+  const description = executionDescription(execution);
+  return (
+    <span aria-label={description} className="agent-execution" tabIndex={0} title={description}>
+      <Icon name="clock" size={13} />
+      <span className="agent-execution-tooltip" role="tooltip">
+        <strong>{execution.model}</strong>
+        <small>{formatExecutionTime(execution.elapsedMs)}</small>
+      </span>
+    </span>
   );
 }

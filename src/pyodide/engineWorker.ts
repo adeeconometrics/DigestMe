@@ -48,6 +48,14 @@ function postStatus(state: WorkerResponse["state"], message?: string): void {
   workerScope.postMessage({ type: "status", state, ...(message ? { message } : {}) });
 }
 
+function summarizeError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "The case-digest agent failed.";
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const summary = lines.findLast((line) => /^[\w.]+(?:Error|Exception):\s/.test(line)) ?? lines.at(-1);
+  if (!summary) return "The case-digest agent failed.";
+  return summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
+}
+
 function writeEngineSources(pyodide: PyodideAPI): void {
   pyodide.FS.mkdirTree(`${ENGINE_ROOT}/engine`);
   for (const [fileName, source] of Object.entries(ENGINE_SOURCES)) {
@@ -67,7 +75,7 @@ async function loadEngine(): Promise<PyodideAPI> {
   postStatus("loading", "Installing the case-digest agent...");
   await pyodide.runPythonAsync(`
 import micropip
-await micropip.install("pydantic-ai-slim[openrouter]")
+await micropip.install(["httpcore2", "pydantic-ai-slim[openrouter]"])
 `);
   writeEngineSources(pyodide);
   await pyodide.runPythonAsync(`
@@ -81,7 +89,7 @@ from engine.bridge import run_request
 
 function getEngine(): Promise<PyodideAPI> {
   pyodidePromise ??= loadEngine().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "The Python agent could not be loaded.";
+    const message = summarizeError(error);
     postStatus("failed", message);
     pyodidePromise = undefined;
     throw error;
@@ -115,7 +123,7 @@ workerScope.onmessage = (event) => {
       const result = await execute(request);
       workerScope.postMessage({ type: "result", requestId: request.requestId, result });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The case-digest agent failed.";
+      const message = summarizeError(error);
       workerScope.postMessage({ type: "error", requestId: request.requestId, message });
     }
   });

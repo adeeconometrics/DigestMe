@@ -82,11 +82,12 @@ function requestAgent(request: AgentRequest): Promise<unknown> {
 
   return new Promise((resolve, reject) => {
     pendingRequests.set(requestId, { resolve, reject });
+    const { credentials, ...command } = request;
     activeWorker.postMessage({
       requestId,
-      ...request,
-      modelId: request.credentials.modelId,
-      apiKey: request.credentials.apiKey,
+      ...command,
+      modelId: credentials.modelId,
+      apiKey: credentials.apiKey,
     });
   });
 }
