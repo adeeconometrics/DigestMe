@@ -1,8 +1,9 @@
 import { flattenTree } from "../parser";
-import type { DocumentNode } from "../parser";
+import type { DocumentNode, DocumentNodeKind } from "../parser";
 
 export interface RetrievalHit {
   nodeId: string;
+  kind: DocumentNodeKind;
   label: string;
   section: string;
   page: number | null;
@@ -70,6 +71,7 @@ export function retrieveNodes(root: DocumentNode, query: string, limit = 3): Ret
     const source = (node.text ?? node.label).trim();
     hits.push({
       nodeId: node.id,
+      kind: node.kind,
       label: node.label,
       section: node.section,
       page: node.page,

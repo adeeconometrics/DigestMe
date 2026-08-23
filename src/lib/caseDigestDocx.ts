@@ -624,7 +624,8 @@ export function caseDigestJsonToDocx(
   return renderCaseDigestDocx(parseCaseDigestJson(input), options);
 }
 
-function defaultFileName(caseTitle: string): string {
+/** Return the stable download name used for a generated case-digest document. */
+export function caseDigestFileName(caseTitle: string): string {
   const slug = caseTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -642,7 +643,7 @@ export async function downloadCaseDigestDocx(
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = fileName ?? defaultFileName(caseDigest.case_title);
+  anchor.download = fileName ?? caseDigestFileName(caseDigest.case_title);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
