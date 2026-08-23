@@ -8,9 +8,12 @@ import {
   renderCaseDigestDocx,
 } from "../src/lib/caseDigestDocx";
 import type { CaseDigestIssueInput } from "../src/lib/caseDigestDocx";
-import { CASE_DIGEST_MOCK } from "../src/data/caseDigestMock";
 import { buildCaseDigest, buildFacts, buildIssue, buildIssuePair } from "./factories";
 import rawMockJson from "./fixtures/case-digest.mock.json";
+
+// The fixture JSON is the single source of the typed mock; parsing it here
+// type-checks it and fails the suite loudly if the fixture ever goes stale.
+const CASE_DIGEST_MOCK = parseCaseDigestJson(rawMockJson);
 
 // Section headings render uppercase (headingParagraph calls toUpperCase()).
 const SECTION_HEADINGS = [
@@ -52,8 +55,14 @@ describe("parseCaseDigestJson", () => {
     expect(parseCaseDigestJson(JSON.stringify(digest))).toEqual(digest);
   });
 
-  it("parses the checked-in dump fixture into the known mock digest", () => {
-    expect(parseCaseDigestJson(rawMockJson)).toEqual(CASE_DIGEST_MOCK);
+  it("parses the fixture into the complete invented digest", () => {
+    const digest = parseCaseDigestJson(rawMockJson);
+
+    expect(digest.case_title).toBe("Villanueva v. Bayside Port Workers Cooperative");
+    expect(digest.petitioner).toBe("Ramon Villanueva, Jr.");
+    expect(digest.facts.petition).toHaveLength(4);
+    expect(digest.issues).toHaveLength(4);
+    expect(digest.class_notes).toHaveLength(2);
   });
 
   it("accepts issues in the short [ruling, ratio] pair form", () => {
