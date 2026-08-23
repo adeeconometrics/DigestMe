@@ -20,7 +20,7 @@ interface WorkerRequest {
 }
 
 interface WorkerResponse {
-  type: "status" | "stream" | "result" | "error";
+  type: "status" | "stream" | "result" | "error" | "heartbeat" | "started";
   requestId?: number;
   state?: "idle" | "loading" | "ready" | "failed";
   message?: string;
@@ -99,6 +99,28 @@ function getEngine(): Promise<PyodideAPI> {
   return pyodidePromise;
 }
 
+/**
+ * Cadence for liveness pings while a request is executing.
+ *
+ * Non-streaming digest runs can stay silent for minutes inside a single LLM
+ * call; the loader uses these pings to tell "busy" apart from "hung" so its
+ * inactivity timer does not kill healthy work (see engineLoader.ts).
+ */
+const HEARTBEAT_INTERVAL_MS = 20_000;
+
+let activeRequests = 0;
+let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+function setActiveRequests(count: number): void {
+  activeRequests = count;
+  if (activeRequests > 0 && heartbeatTimer === undefined) {
+    heartbeatTimer = setInterval(() => workerScope.postMessage({ type: "heartbeat" }), HEARTBEAT_INTERVAL_MS);
+  } else if (activeRequests === 0 && heartbeatTimer !== undefined) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  }
+}
+
 async function execute(request: WorkerRequest): Promise<unknown> {
   const pyodide = await getEngine();
   const payload = JSON.stringify({
@@ -135,12 +157,18 @@ let requestChain = Promise.resolve();
 workerScope.onmessage = (event) => {
   const request = event.data;
   requestChain = requestChain.then(async () => {
+    // Acknowledge the hand-off so the loader starts this request's inactivity
+    // timer only now — queued requests must not tick while they wait.
+    workerScope.postMessage({ type: "started", requestId: request.requestId });
+    setActiveRequests(activeRequests + 1);
     try {
       const result = await execute(request);
       workerScope.postMessage({ type: "result", requestId: request.requestId, result });
     } catch (error) {
       const message = summarizeError(error);
       workerScope.postMessage({ type: "error", requestId: request.requestId, message });
+    } finally {
+      setActiveRequests(activeRequests - 1);
     }
   });
 };
