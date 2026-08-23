@@ -87,6 +87,18 @@ describe("parseCaseDigestJson", () => {
     expect(parseCaseDigestJson(digest).facts.respondent_version).toEqual(["Their version."]);
   });
 
+  it("accepts null optional fields emitted by Pydantic", () => {
+    const digest = {
+      ...buildCaseDigest(),
+      facts: { petition: ["Petition fact."], petitioner_version: null, respondent_version: null },
+      issues: [{ issue: null, ruling: "YES", ratio: "Because." }],
+    } as unknown;
+
+    const parsed = parseCaseDigestJson(digest);
+    expect(parsed.facts).toEqual({ petition: ["Petition fact."] });
+    expect(parsed.issues).toEqual([{ ruling: "YES", ratio: "Because." }]);
+  });
+
   it("throws when the input is not an object", () => {
     expect(() => parseCaseDigestJson(null)).toThrow("Expected case-digest JSON to be an object.");
   });

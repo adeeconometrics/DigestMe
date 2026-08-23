@@ -160,10 +160,10 @@ function parseFacts(value: unknown): CaseDigestFacts {
     petition: requiredStringArray(value, "petition", "facts.petition"),
   };
 
-  if (value.petitioner_version !== undefined) {
+  if (value.petitioner_version !== undefined && value.petitioner_version !== null) {
     facts.petitioner_version = requiredStringArray(value, "petitioner_version", "facts.petitioner_version");
   }
-  if (value.respondent_version !== undefined) {
+  if (value.respondent_version !== undefined && value.respondent_version !== null) {
     facts.respondent_version = requiredStringArray(value, "respondent_version", "facts.respondent_version");
   }
 
@@ -188,7 +188,7 @@ function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
     ruling: requiredString(value, "ruling", `${path}.ruling`),
     ratio: requiredString(value, "ratio", `${path}.ratio`),
   };
-  if (value.issue !== undefined) {
+  if (value.issue !== undefined && value.issue !== null) {
     issue.issue = requiredString(value, "issue", `${path}.issue`);
   }
   return issue;
@@ -624,7 +624,8 @@ export function caseDigestJsonToDocx(
   return renderCaseDigestDocx(parseCaseDigestJson(input), options);
 }
 
-function defaultFileName(caseTitle: string): string {
+/** Return the stable download name used for a generated case-digest document. */
+export function caseDigestFileName(caseTitle: string): string {
   const slug = caseTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -642,7 +643,7 @@ export async function downloadCaseDigestDocx(
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = fileName ?? defaultFileName(caseDigest.case_title);
+  anchor.download = fileName ?? caseDigestFileName(caseDigest.case_title);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

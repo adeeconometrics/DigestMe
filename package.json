@@ -17,9 +17,12 @@
   "dependencies": {
     "@firecrawl/pdf-inspector-wasm": "^1.17.0",
     "docx": "^9.7.1",
+    "dompurify": "^3.4.14",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
+    "marked": "^18.0.10",
     "pdfjs-dist": "^6.2.108",
+    "pyodide": "^314.0.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sigma": "^3.0.3"

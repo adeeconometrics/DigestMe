@@ -13,3 +13,13 @@ opencode.jsonc
 *.csv
 coverage/
 semgrep-results.sarif
+
+# Python engine
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
+build/
