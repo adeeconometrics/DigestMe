@@ -88,5 +88,5 @@ def document_tree(document_tree_payload: dict[str, object]) -> DocumentNode:
 @pytest.fixture
 def digest_payload() -> dict[str, object]:
     """Load the digest fixture consumed by the TypeScript DOCX renderer."""
-    fixture_path = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "case-digest.mock.json"
+    fixture_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "case-digest.mock.json"
     return cast(dict[str, object], json.loads(fixture_path.read_text(encoding="utf-8")))
