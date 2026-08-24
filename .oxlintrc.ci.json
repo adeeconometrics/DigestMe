@@ -1,0 +1,27 @@
+{
+  "plugins": ["typescript", "react"],
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".code-review-graph/**",
+    ".codebase-memory/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**"
+  ],
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "react/set-state-in-effect": "warn",
+    "react-hooks/exhaustive-deps": "warn"
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  }
+}
