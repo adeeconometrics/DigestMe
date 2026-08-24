@@ -129,7 +129,9 @@ function createWorker(): Worker {
     const message = event.data;
     if (message.type === "status") {
       if (message.state !== "idle") refreshPendingTimers();
-      setEngineStatus({ state: message.state, ...(message.message ? { message: message.message } : {}) });
+      const status: EngineStatus = { state: message.state };
+      if (message.message) status.message = message.message;
+      setEngineStatus(status);
       return;
     }
 

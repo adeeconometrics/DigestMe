@@ -47,7 +47,9 @@ const workerScope = globalThis as typeof globalThis & {
 let pyodidePromise: Promise<PyodideAPI> | undefined;
 
 function postStatus(state: WorkerResponse["state"], message?: string): void {
-  workerScope.postMessage({ type: "status", state, ...(message ? { message } : {}) });
+  const status: WorkerResponse = { type: "status", state };
+  if (message) status.message = message;
+  workerScope.postMessage(status);
 }
 
 function summarizeError(error: unknown): string {

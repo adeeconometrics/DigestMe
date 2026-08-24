@@ -88,12 +88,13 @@ export async function openWithKey(key: CryptoKey, subtle: SubtleCrypto, sealed: 
 /** Load only non-secret metadata for the settings UI. */
 export async function loadAgentSettings(): Promise<AgentSettingsStatus> {
   const stored = await getMetaValue<StoredAgentSettings>(SETTINGS_ID);
-  return {
+  const status: AgentSettingsStatus = {
     modelId: stored?.modelId ?? "",
     hasApiKey: Boolean(stored?.sealedApiKey),
-    ...(stored?.apiKeyHint ? { apiKeyHint: stored.apiKeyHint } : {}),
-    ...(stored?.savedAt ? { savedAt: stored.savedAt } : {}),
   };
+  if (stored?.apiKeyHint) status.apiKeyHint = stored.apiKeyHint;
+  if (stored?.savedAt) status.savedAt = stored.savedAt;
+  return status;
 }
 
 /** Persist a model and seal a newly supplied key; an empty key preserves the old one. */
@@ -105,9 +106,9 @@ export async function saveAgentSettings(modelId: string, apiKey = ""): Promise<A
   const next: StoredAgentSettings = {
     modelId: normalizedModel,
     savedAt: new Date().toISOString(),
-    ...(stored?.sealedApiKey && !apiKey ? { sealedApiKey: stored.sealedApiKey } : {}),
-    ...(stored?.apiKeyHint && !apiKey ? { apiKeyHint: stored.apiKeyHint } : {}),
   };
+  if (stored?.sealedApiKey && !apiKey) next.sealedApiKey = stored.sealedApiKey;
+  if (stored?.apiKeyHint && !apiKey) next.apiKeyHint = stored.apiKeyHint;
 
   if (apiKey) {
     const error = validateApiKey(apiKey);
@@ -121,22 +122,22 @@ export async function saveAgentSettings(modelId: string, apiKey = ""): Promise<A
   if (!next.sealedApiKey) throw new Error("Add your OpenRouter API key before saving.");
   await putMetaValue(SETTINGS_ID, next);
 
-  return {
+  const status: AgentSettingsStatus = {
     modelId: next.modelId,
     hasApiKey: true,
-    ...(next.apiKeyHint ? { apiKeyHint: next.apiKeyHint } : {}),
-    ...(next.savedAt ? { savedAt: next.savedAt } : {}),
   };
+  if (next.apiKeyHint) status.apiKeyHint = next.apiKeyHint;
+  if (next.savedAt) status.savedAt = next.savedAt;
+  return status;
 }
 
 /** Remove the sealed credential while retaining the selected model. */
 export async function clearAgentApiKey(): Promise<void> {
   const stored = await getMetaValue<StoredAgentSettings>(SETTINGS_ID);
   if (!stored?.sealedApiKey && !stored?.apiKeyHint) return;
-  await putMetaValue(SETTINGS_ID, {
-    modelId: stored.modelId,
-    ...(stored.savedAt ? { savedAt: stored.savedAt } : {}),
-  });
+  const cleared: StoredAgentSettings = { modelId: stored.modelId };
+  if (stored.savedAt) cleared.savedAt = stored.savedAt;
+  await putMetaValue(SETTINGS_ID, cleared);
 }
 
 /** Decrypt credentials immediately before a bridge call; callers must not cache the result. */

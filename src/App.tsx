@@ -262,14 +262,15 @@ export default function App() {
   function saveActiveSession(stats: SessionStats, completed = false) {
     if (!activeDeck || !activeSessionId || !sessionStartedAt) return;
     const updatedAt = new Date().toISOString();
-    persistSession({
+    const session: StudySession = {
       id: activeSessionId,
       deckId: activeDeck.id,
       startedAt: sessionStartedAt,
       updatedAt,
-      ...(completed ? { completedAt: updatedAt } : {}),
       ...stats,
-    });
+    };
+    if (completed) session.completedAt = updatedAt;
+    persistSession(session);
   }
 
   async function processFile(file: File) {

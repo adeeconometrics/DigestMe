@@ -124,12 +124,13 @@ function parseExecution(value: unknown): AgentExecution {
   }
   const startedAt = optionalTimestamp(result.started_at, "start time");
   const endedAt = optionalTimestamp(result.ended_at, "end time");
-  return {
+  const execution: AgentExecution = {
     model: requiredString(result.model, "model"),
     elapsedMs,
-    ...(startedAt === undefined ? {} : { startedAt }),
-    ...(endedAt === undefined ? {} : { endedAt }),
   };
+  if (startedAt !== undefined) execution.startedAt = startedAt;
+  if (endedAt !== undefined) execution.endedAt = endedAt;
+  return execution;
 }
 
 function optionalTimestamp(value: unknown, name: string): number | undefined {
@@ -211,17 +212,19 @@ export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
     const kind = streamKind(event.kind);
     const base = { type, index: streamIndex(event.index), kind } as const;
     if (kind === "tool-call") {
-      return {
+      const part: Extract<ChatStreamEvent, { type: "part-start" }> = {
         ...base,
         toolCallId: requiredString(event.tool_call_id, "tool call id"),
         toolName: requiredString(event.tool_name, "tool name"),
-        ...(event.args === undefined ? {} : { args: event.args }),
       };
+      if (event.args !== undefined) part.args = event.args;
+      return part;
     }
-    return {
-      ...base,
-      ...(event.content === undefined ? {} : { content: requiredString(event.content, "part content") }),
-    };
+    const part: Extract<ChatStreamEvent, { type: "part-start" }> = { ...base };
+    if (event.content !== undefined) {
+      part.content = requiredString(event.content, "part content");
+    }
+    return part;
   }
 
   if (type === "part-delta") {
@@ -233,25 +236,19 @@ export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
     if (contentDelta === undefined && argsDelta === undefined && toolNameDelta === undefined && toolCallId === undefined) {
       throw new Error("Agent returned an empty chat stream delta.");
     }
-    return {
-      type,
-      index: streamIndex(event.index),
-      kind,
-      ...(contentDelta === undefined ? {} : { contentDelta }),
-      ...(argsDelta === undefined ? {} : { argsDelta }),
-      ...(toolNameDelta === undefined ? {} : { toolNameDelta }),
-      ...(toolCallId === undefined ? {} : { toolCallId }),
-    };
+    const delta: Extract<ChatStreamEvent, { type: "part-delta" }> = { type, index: streamIndex(event.index), kind };
+    if (contentDelta !== undefined) delta.contentDelta = contentDelta;
+    if (argsDelta !== undefined) delta.argsDelta = argsDelta;
+    if (toolNameDelta !== undefined) delta.toolNameDelta = toolNameDelta;
+    if (toolCallId !== undefined) delta.toolCallId = toolCallId;
+    return delta;
   }
 
   if (type === "part-end") {
     const args = event.args;
-    return {
-      type,
-      index: streamIndex(event.index),
-      kind: streamKind(event.kind),
-      ...(args === undefined ? {} : { args }),
-    };
+    const part: Extract<ChatStreamEvent, { type: "part-end" }> = { type, index: streamIndex(event.index), kind: streamKind(event.kind) };
+    if (args !== undefined) part.args = args;
+    return part;
   }
 
   if (type === "tool-call") {

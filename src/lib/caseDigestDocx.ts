@@ -18,7 +18,7 @@ import {
   VerticalAlignTable,
   WidthType,
 } from "docx";
-import type { FileChild, IParagraphOptions, ParagraphChild, TableVerticalAlign } from "docx";
+import type { FileChild, IParagraphOptions, ISectionOptions, ParagraphChild, TableVerticalAlign } from "docx";
 
 /** Facts are grouped to mirror the FACTS section in the case-digest template. */
 export interface CaseDigestFacts {
@@ -340,10 +340,11 @@ function cell(children: readonly (Paragraph | Table)[], options: CellOptions = {
 }
 
 function row(children: readonly TableCell[], height?: number): TableRow {
-  return new TableRow({
-    children,
-    ...(height === undefined ? {} : { height: { value: height, rule: HeightRule.ATLEAST } }),
-  });
+  return new TableRow(
+    height === undefined
+      ? { children }
+      : { children, height: { value: height, rule: HeightRule.ATLEAST } },
+  );
 }
 
 function table(rows: readonly TableRow[], columnWidths: number[], width: number): Table {
@@ -584,7 +585,7 @@ export function createCaseDigestDocument(
   caseDigest: CaseDigest,
   options: CaseDigestDocxOptions = {},
 ): Document {
-  const section = {
+  const section: ISectionOptions = {
     properties: {
       page: {
         size: { width: 12240, height: 15840 },
@@ -594,10 +595,10 @@ export function createCaseDigestDocument(
     children: renderBody(caseDigest),
     ...(options.headerText
       ? { headers: { default: new Header({ children: [headerFooterParagraph(options.headerText)] }) } }
-      : {}),
+      : null),
     ...(options.footerText
       ? { footers: { default: new Footer({ children: [headerFooterParagraph(options.footerText)] }) } }
-      : {}),
+      : null),
   };
 
   return new Document({
