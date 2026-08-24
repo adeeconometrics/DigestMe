@@ -148,7 +148,7 @@ export default function DigestPage({
   useEffect(() => {
     if (!pendingFile || pendingFileConsumedRef.current) return;
     pendingFileConsumedRef.current = true;
-    void processPdf(pendingFile);
+    queueMicrotask(() => void processPdf(pendingFile));
   }, [pendingFile]);
 
   // Keep the newest message in view as the thread grows.
