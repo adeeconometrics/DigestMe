@@ -55,6 +55,7 @@ interface DigestPreview {
 
 interface DigestPageProps {
   documentId: string | null;
+  autoRunDigest?: boolean;
   pendingFile?: File | null;
   onDocumentReady?: (summary: DocumentSummary) => void;
   onStatusChange?: (status: AgentStatus) => void;
@@ -74,6 +75,7 @@ interface ThreadSnapshot {
 /** Case digest: a chat session over a locally parsed PDF. */
 export default function DigestPage({
   documentId,
+  autoRunDigest,
   pendingFile,
   onDocumentReady,
   onStatusChange,
@@ -111,6 +113,7 @@ export default function DigestPage({
   const isSessionReadyRef = useRef(isSessionReady);
   const onStatusChangeRef = useRef(onStatusChange);
   const pendingFileConsumedRef = useRef(false);
+  const autoRunConsumedRef = useRef(false);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -157,6 +160,75 @@ export default function DigestPage({
   const pushError = useCallback((text: string): void => {
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "error", text });
   }, [pushMessage]);
+
+  /** Connect to the agent and compose the structured case digest for a parsed document. */
+  const runCaseDigest = useCallback(async (selectedDocument: ParsedDocument): Promise<void> => {
+    const requestId = ++agentRequestRef.current;
+    const credentials = await getAgentRuntimeCredentials().catch(() => null);
+    if (requestId !== agentRequestRef.current) return;
+    if (!credentials) {
+      pushError("Save an OpenRouter model and API key in Settings before running /digest.");
+      return;
+    }
+
+    const requestOptions = {
+      onRequestId: (loaderRequestId: number) => {
+        if (requestId === agentRequestRef.current) {
+          activeAgentRequestIdRef.current = loaderRequestId;
+        } else {
+          cancelAgentRequest(loaderRequestId);
+        }
+      },
+    };
+
+    setAgentStatus("running");
+    let completed = false;
+    try {
+      const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
+      if (requestId !== agentRequestRef.current) return;
+
+      const markdown = caseDigestToMarkdown(result.digest);
+      const docxBlob = await renderCaseDigestDocx(result.digest);
+      if (requestId !== agentRequestRef.current) return;
+      const docxUrl = URL.createObjectURL(docxBlob);
+      const messageId = makeMessageId();
+      const docxFileId = `${sessionIdRef.current}-${messageId}`;
+      const docxFileName = caseDigestFileName(result.digest.case_title);
+      docxUrlsRef.current.add(docxUrl);
+      digestFilesRef.current.set(docxFileId, {
+        id: docxFileId,
+        sessionId: sessionIdRef.current,
+        fileName: docxFileName,
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        blob: docxBlob,
+      });
+      pushMessage({
+        id: messageId,
+        at: new Date().toISOString(),
+        role: "assistant",
+        kind: "digest",
+        markdown,
+        digest: result.digest,
+        refs: mapAgentReferences(selectedDocument.root, result.references),
+        execution: { model: result.model, elapsedMs: result.elapsedMs },
+        docxUrl,
+        docxFileName,
+        docxFileId,
+        docxBlob,
+      });
+      completed = true;
+    } catch (error) {
+      if (requestId === agentRequestRef.current) {
+        pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
+        setAgentStatus("failed");
+      }
+    } finally {
+      if (requestId === agentRequestRef.current) {
+        activeAgentRequestIdRef.current = null;
+        if (completed) setAgentStatus("idle");
+      }
+    }
+  }, [pushError, pushMessage]);
 
   const stopAgent = useCallback((removeStreamMessage: boolean): void => {
     agentRequestRef.current += 1;
@@ -247,7 +319,9 @@ export default function DigestPage({
           docxUrlsRef.current.add(docxUrl);
           return { ...message, docxBlob: asset.blob, docxUrl };
         });
-        setSessionId(thread?.threadId ?? storedSession?.session.id ?? makeSessionId());
+        const restoredSessionId = thread?.threadId ?? storedSession?.session.id ?? makeSessionId();
+        setSessionId(restoredSessionId);
+        sessionIdRef.current = restoredSessionId;
         setSessionCreatedAt(thread?.createdAt ?? storedSession?.session.createdAt ?? new Date().toISOString());
         setSessionDocumentId(documentId);
         setIsSessionReady(true);
@@ -261,6 +335,11 @@ export default function DigestPage({
         setMessages(restoredMessages);
         setAgentStatus("idle");
         lastPersistedFingerprintRef.current = "";
+        if (autoRunDigest && !autoRunConsumedRef.current) {
+          autoRunConsumedRef.current = true;
+          pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: "/digest" });
+          void runCaseDigest(source.document);
+        }
       } catch (error) {
         if (!mounted) return;
         setStatus("error");
@@ -270,7 +349,7 @@ export default function DigestPage({
     return () => {
       mounted = false;
     };
-  }, [clearDocxAssets, documentId, pushError]);
+  }, [autoRunDigest, clearDocxAssets, documentId, pushError, pushMessage, runCaseDigest]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -399,6 +478,11 @@ export default function DigestPage({
       return;
     }
 
+    if (isDigestCommand(question)) {
+      await runCaseDigest(selectedDocument);
+      return;
+    }
+
     const credentials = await getAgentRuntimeCredentials().catch(() => null);
     if (requestId !== agentRequestRef.current) return;
 
@@ -411,62 +495,6 @@ export default function DigestPage({
         }
       },
     };
-
-    if (isDigestCommand(question)) {
-      if (!credentials) {
-        pushError("Save an OpenRouter model and API key in Settings before running /digest.");
-        return;
-      }
-
-      setAgentStatus("running");
-      let completed = false;
-      try {
-        const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
-        if (requestId !== agentRequestRef.current) return;
-
-        const markdown = caseDigestToMarkdown(result.digest);
-        const docxBlob = await renderCaseDigestDocx(result.digest);
-        if (requestId !== agentRequestRef.current) return;
-        const docxUrl = URL.createObjectURL(docxBlob);
-        const messageId = makeMessageId();
-        const docxFileId = `${sessionIdRef.current}-${messageId}`;
-        const docxFileName = caseDigestFileName(result.digest.case_title);
-        docxUrlsRef.current.add(docxUrl);
-        digestFilesRef.current.set(docxFileId, {
-          id: docxFileId,
-          sessionId,
-          fileName: docxFileName,
-          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          blob: docxBlob,
-        });
-        pushMessage({
-          id: messageId,
-          at: new Date().toISOString(),
-          role: "assistant",
-          kind: "digest",
-          markdown,
-          digest: result.digest,
-          refs: mapAgentReferences(selectedDocument.root, result.references),
-          execution: { model: result.model, elapsedMs: result.elapsedMs },
-          docxUrl,
-          docxFileName,
-          docxFileId,
-          docxBlob,
-        });
-        completed = true;
-      } catch (error) {
-        if (requestId === agentRequestRef.current) {
-          pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
-          setAgentStatus("failed");
-        }
-      } finally {
-        if (requestId === agentRequestRef.current) {
-          activeAgentRequestIdRef.current = null;
-          if (completed) setAgentStatus("idle");
-        }
-      }
-      return;
-    }
 
     if (!credentials) {
       pushMessage({

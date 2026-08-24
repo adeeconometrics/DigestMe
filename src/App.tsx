@@ -41,6 +41,7 @@ interface SessionStats {
 interface DigestTab {
   id: string;
   documentId: string | null;
+  autoRunDigest?: boolean;
   pendingFile?: File | null;
 }
 
@@ -154,7 +155,7 @@ export default function App() {
         setOpenPanel(null);
         return;
       }
-      const tabs = pdfs.map((file) => newDigestTab(file));
+      const tabs = pdfs.map((file) => ({ ...newDigestTab(file), autoRunDigest: true }));
       setDigestTabs((previous) => [...previous, ...tabs]);
       setActiveDigestTabId(tabs[0].id);
       setView("digest");
@@ -191,7 +192,7 @@ export default function App() {
 
   const handleDocumentReady = useCallback((tabId: string, summary: DocumentSummary): void => {
     setDocumentSummaries((previous) => [summary, ...previous.filter((candidate) => candidate.id !== summary.id)]);
-    setDigestTabs((previous) => previous.map((tab) => tab.id === tabId ? { id: summary.id, documentId: summary.id } : tab));
+    setDigestTabs((previous) => previous.map((tab) => tab.id === tabId ? { id: summary.id, documentId: summary.id, autoRunDigest: tab.autoRunDigest } : tab));
     setActiveDigestTabId(summary.id);
   }, []);
 
@@ -712,6 +713,7 @@ function DigestWorkspace({
         {tabs.map((tab) => (
           <div aria-hidden={activeTabId !== tab.id} className="digest-tab-panel" hidden={activeTabId !== tab.id} key={tab.id} role="tabpanel">
             <DigestPage
+              autoRunDigest={tab.autoRunDigest ?? false}
               documentId={tab.documentId}
               onDocumentReady={(summary) => onDocumentReady(tab.id, summary)}
               onStatusChange={(status) => onStatusChange(tab.id, status)}
