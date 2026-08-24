@@ -81,7 +81,8 @@ export default function DocxPreviewModal({ blob, fileName, downloadUrl, onClose 
           </button>
         </div>
 
-        <div className="docx-preview-body" ref={bodyRef}>
+        <div className="docx-preview-body">
+          <div className="docx-preview-render" ref={bodyRef} />
           {status === "rendering" && <div className="docx-preview-status">Rendering the document...</div>}
           {status === "error" && <div className="docx-preview-status is-error">This document could not be rendered in the browser.</div>}
         </div>
