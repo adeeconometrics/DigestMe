@@ -1,7 +1,10 @@
 node_modules/
 dist/
 AGENTS.md
+.agents/
+
 dump/*.docx
+skills-lock.json
 .DS_Store
 
 dump/
