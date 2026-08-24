@@ -5,7 +5,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import Icon from "../components/Icon";
 import DigestGraph from "../components/DigestGraph";
-import { getDigestSession, putDigestSession, removeDocument } from "../lib/db";
+import { getChatThreadForDocument, getDigestSession, getDocumentWithSource, putChatThread, putDigestSession, removeDocument } from "../lib/db";
 import type { StoredDocumentFile, StoredDigestFile } from "../lib/db";
 import { caseDigestFileName, renderCaseDigestDocx } from "../lib/caseDigestDocx";
 import { caseDigestToMarkdown } from "../lib/caseDigestMarkdown";
@@ -18,14 +18,14 @@ import { retrieveNodes } from "../chat/retrieval";
 import type { RetrievalHit } from "../chat/retrieval";
 import {
   serializeChatMessage,
-  summarizeDigestSession,
   type ChatMessage,
+  type ChatThread,
   type DigestSession,
-  type DigestSessionSummary,
   type PersistedChatMessage,
 } from "../chat/session";
-import { disposeEngine, runCaseDigestAgent, streamChatAgent, subscribeEngineStatus } from "../pyodide/engineLoader";
+import { cancelAgentRequest, disposeEngine, runCaseDigestAgent, streamChatAgent } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
+import type { DocumentSummary } from "../types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
 const DocxPreviewModal = lazy(() => import("../components/DocxPreviewModal"));
@@ -43,7 +43,7 @@ function makeSessionId(): string {
   return `digest-${randomId ?? Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-function welcomeMessage(): ChatMessage {
+function welcomeMessage(): Extract<ChatMessage, { kind: "welcome" }> {
   return { id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "welcome" };
 }
 
@@ -54,35 +54,35 @@ interface DigestPreview {
 }
 
 interface DigestPageProps {
-  /** Incremented by the sidebar "New session" action; resets the thread. */
-  sessionToken?: number;
-  /** Sidebar request to open a previously persisted chat session. */
-  focusSession?: { id: string; nonce: number } | null;
-  /** Called after a session snapshot has been stored successfully. */
-  onSessionChange?: (summary: DigestSessionSummary) => void;
-  /** Exposes the currently mounted session to the parent sidebar. */
-  onSessionIdChange?: (sessionId: string | null) => void;
-  /** Called when local persistence cannot save a session snapshot. */
+  documentId: string | null;
+  onDocumentReady?: (summary: DocumentSummary) => void;
+  onStatusChange?: (status: AgentStatus) => void;
   onStorageError?: (message: string) => void;
-  /** Prevents a queued write from recreating a session the sidebar deleted. */
-  deletedSessionId?: string | null;
+}
+
+interface ThreadSnapshot {
+  isReady: boolean;
+  messages: ChatMessage[];
+  selected: ParsedDocument | null;
+  selectedFile: StoredDocumentFile | null;
+  sessionCreatedAt: string;
+  sessionDocumentId: string | null;
+  sessionId: string;
 }
 
 /** Case digest: a chat session over a locally parsed PDF. */
 export default function DigestPage({
-  deletedSessionId = null,
-  focusSession = null,
-  onSessionChange,
-  onSessionIdChange,
+  documentId,
+  onDocumentReady,
+  onStatusChange,
   onStorageError,
-  sessionToken = 0,
 }: DigestPageProps) {
   const [selected, setSelected] = useState<ParsedDocument | null>(null);
   const [selectedFile, setSelectedFile] = useState<StoredDocumentFile | null>(null);
   const [sessionId, setSessionId] = useState(() => makeSessionId());
   const [sessionCreatedAt, setSessionCreatedAt] = useState(() => new Date().toISOString());
   const [sessionDocumentId, setSessionDocumentId] = useState<string | null>(null);
-  const [isSessionReady, setIsSessionReady] = useState(() => !focusSession);
+  const [isSessionReady, setIsSessionReady] = useState(() => documentId === null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
@@ -94,12 +94,20 @@ export default function DigestPage({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const agentRequestRef = useRef(0);
+  const activeAgentRequestIdRef = useRef<number | null>(null);
   const activeStreamMessageRef = useRef<string | null>(null);
   const docxUrlsRef = useRef<Set<string>>(new Set());
   const digestFilesRef = useRef<Map<string, StoredDigestFile>>(new Map());
   const persistenceQueueRef = useRef(Promise.resolve());
   const lastPersistedFingerprintRef = useRef("");
-  const blockedSessionIdsRef = useRef(new Set<string>());
+  const messagesRef = useRef(messages);
+  const selectedRef = useRef(selected);
+  const selectedFileRef = useRef(selectedFile);
+  const sessionIdRef = useRef(sessionId);
+  const sessionCreatedAtRef = useRef(sessionCreatedAt);
+  const sessionDocumentIdRef = useRef(sessionDocumentId);
+  const isSessionReadyRef = useRef(isSessionReady);
+  const onStatusChangeRef = useRef(onStatusChange);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -116,25 +124,19 @@ export default function DigestPage({
     digestFilesRef.current.clear();
   }, []);
 
-  const resetSessionState = useCallback((): void => {
-    agentRequestRef.current += 1;
-    activeStreamMessageRef.current = null;
-    clearDocxAssets();
-    lastPersistedFingerprintRef.current = "";
-    setSessionId(makeSessionId());
-    setSessionCreatedAt(new Date().toISOString());
-    setSessionDocumentId(null);
-    setIsSessionReady(true);
-    setSelected(null);
-    setSelectedFile(null);
-    setSelectedNodeId(null);
-    setFocusRequest(null);
-    setStatus("idle");
-    setAgentStatus("idle");
-    setDraft("");
-    setPreview(null);
-    setMessages([welcomeMessage()]);
-  }, [clearDocxAssets]);
+  useEffect(() => {
+    messagesRef.current = messages;
+    selectedRef.current = selected;
+    selectedFileRef.current = selectedFile;
+    sessionIdRef.current = sessionId;
+    sessionCreatedAtRef.current = sessionCreatedAt;
+    sessionDocumentIdRef.current = sessionDocumentId;
+    isSessionReadyRef.current = isSessionReady;
+  }, [isSessionReady, messages, selected, selectedFile, sessionCreatedAt, sessionDocumentId, sessionId]);
+
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
 
   // Keep the newest message in view as the thread grows.
   useEffect(() => {
@@ -142,82 +144,146 @@ export default function DigestPage({
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
-  // Surface engine crashes as a persistent "failed" state, and clear it once a
-  // reload resets the engine. In-flight requests set their own "running" state.
-  useEffect(
-    () =>
-      subscribeEngineStatus((nextStatus) => {
-        setAgentStatus((current) => {
-          if (nextStatus.state === "failed") return "failed";
-          if (nextStatus.state === "idle" && current === "failed") return "idle";
-          return current;
-        });
-      }),
-    [],
-  );
-
-  useEffect(
-    () => () => {
-      agentRequestRef.current += 1;
-      disposeEngine();
-      clearDocxAssets();
-    },
-    [clearDocxAssets],
-  );
-
-  // Sidebar "New session": clear the thread and selection.
-  const firstSessionToken = useRef(sessionToken);
-  useEffect(() => {
-    if (sessionToken === firstSessionToken.current) return;
-    resetSessionState();
-  }, [resetSessionState, sessionToken]);
-
-  // A deleted active session must not be recreated by a queued persistence job.
-  useEffect(() => {
-    if (!deletedSessionId || deletedSessionId !== sessionId) return;
-    blockedSessionIdsRef.current.add(deletedSessionId);
-    resetSessionState();
-  }, [deletedSessionId, resetSessionState, sessionId]);
-
-  // Sidebar session list: open a stored transcript on demand.
-  const lastFocusNonce = useRef(0);
-  useEffect(() => {
-    if (!focusSession || focusSession.nonce === lastFocusNonce.current) return;
-    lastFocusNonce.current = focusSession.nonce;
-    if (focusSession.id === sessionId) {
-      setIsSessionReady(true);
-      return;
-    }
-    setIsSessionReady(false);
-    void handleSelect(focusSession.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusSession, sessionId]);
-
-  useEffect(() => {
-    if (!isSessionReady) return undefined;
-    onSessionIdChange?.(sessionId);
-    return () => onSessionIdChange?.(null);
-  }, [isSessionReady, onSessionIdChange, sessionId]);
-
   const pushError = useCallback((text: string): void => {
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "error", text });
   }, [pushMessage]);
 
-  function openSession(parsed: ParsedDocument, file: StoredDocumentFile, additions: ChatMessage[]): void {
+  const stopAgent = useCallback((removeStreamMessage: boolean): void => {
     agentRequestRef.current += 1;
-    const activeStreamMessageId = activeStreamMessageRef.current;
+    const requestId = activeAgentRequestIdRef.current;
+    activeAgentRequestIdRef.current = null;
+    if (requestId !== null) cancelAgentRequest(requestId);
+    const streamMessageId = activeStreamMessageRef.current;
     activeStreamMessageRef.current = null;
-    if (activeStreamMessageId) {
-      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
+    if (removeStreamMessage && streamMessageId) {
+      setMessages((previous) => previous.filter((message) => message.id !== streamMessageId));
     }
-    setAgentStatus("idle");
-    setSelected(parsed);
-    setSelectedFile(file);
-    setSessionDocumentId(parsed.id);
-    setSelectedNodeId(null);
-    setStatus("idle");
-    setMessages((previous) => [...previous.filter((message) => message.kind !== "agent-stream"), ...additions]);
-  }
+    if (removeStreamMessage) {
+      setAgentStatus("idle");
+    }
+  }, []);
+
+  const queuePersistSnapshot = useCallback((snapshot: ThreadSnapshot): void => {
+    if (!snapshot.isReady) return;
+    const targetDocumentId = snapshot.selected?.id ?? snapshot.sessionDocumentId;
+    if (!targetDocumentId) return;
+    const title = snapshot.selected?.fileName ?? "New digest session";
+    const messagesToPersist = snapshot.messages
+      .map(serializeChatMessage)
+      .filter((message): message is PersistedChatMessage => message !== null);
+    const digestFiles = Array.from(digestFilesRef.current.values());
+    const fingerprint = JSON.stringify({
+      createdAt: snapshot.sessionCreatedAt,
+      digestFiles: digestFiles.map((file) => ({ id: file.id, fileName: file.fileName })),
+      documentId: targetDocumentId,
+      messages: messagesToPersist,
+      sessionId: snapshot.sessionId,
+      title,
+    });
+    if (fingerprint === lastPersistedFingerprintRef.current) return;
+    lastPersistedFingerprintRef.current = fingerprint;
+
+    const updatedAt = new Date().toISOString();
+    const thread: ChatThread = {
+      threadId: snapshot.sessionId,
+      documentId: targetDocumentId,
+      messages: messagesToPersist,
+      createdAt: snapshot.sessionCreatedAt,
+      updatedAt,
+    };
+    const session: DigestSession = {
+      id: snapshot.sessionId,
+      title,
+      documentId: targetDocumentId,
+      createdAt: snapshot.sessionCreatedAt,
+      updatedAt,
+      messages: messagesToPersist,
+    };
+    const source = snapshot.selected && snapshot.selectedFile ? { document: snapshot.selected, file: snapshot.selectedFile } : undefined;
+    persistenceQueueRef.current = persistenceQueueRef.current
+      .catch(() => undefined)
+      .then(() => putChatThread(thread))
+      .then(() => putDigestSession(session, source, digestFiles))
+      .catch(() => {
+        lastPersistedFingerprintRef.current = "";
+        onStorageError?.("IndexedDB could not save this chat thread.");
+      });
+  }, [onStorageError]);
+
+  useEffect(() => {
+    onStatusChange?.(agentStatus);
+  }, [agentStatus, onStatusChange]);
+
+  useEffect(() => {
+    if (documentId === null) return undefined;
+    let mounted = true;
+    setIsSessionReady(false);
+    void (async () => {
+      try {
+        const source = await getDocumentWithSource(documentId);
+        if (!source) throw new Error("That document could not be loaded from local storage.");
+        const thread = await getChatThreadForDocument(documentId);
+        const storedSession = thread ? await getDigestSession(thread.threadId) : undefined;
+        if (!mounted) return;
+
+        clearDocxAssets();
+        const assets = new Map(storedSession?.digestFiles.map((file) => [file.id, file]) ?? []);
+        digestFilesRef.current = assets;
+        const restoredMessages: ChatMessage[] = (thread?.messages ?? storedSession?.session.messages ?? [welcomeMessage()]).map((message) => {
+          if (message.kind !== "digest") return message;
+          const asset = assets.get(message.docxFileId);
+          if (!asset) return message;
+          const docxUrl = URL.createObjectURL(asset.blob);
+          docxUrlsRef.current.add(docxUrl);
+          return { ...message, docxBlob: asset.blob, docxUrl };
+        });
+        setSessionId(thread?.threadId ?? storedSession?.session.id ?? makeSessionId());
+        setSessionCreatedAt(thread?.createdAt ?? storedSession?.session.createdAt ?? new Date().toISOString());
+        setSessionDocumentId(documentId);
+        setIsSessionReady(true);
+        setSelected(source.document);
+        setSelectedFile(source.file);
+        setSelectedNodeId(null);
+        setFocusRequest(null);
+        setStatus("idle");
+        setDraft("");
+        setPreview(null);
+        setMessages(restoredMessages);
+        setAgentStatus("idle");
+        lastPersistedFingerprintRef.current = "";
+      } catch (error) {
+        if (!mounted) return;
+        setStatus("error");
+        pushError(error instanceof Error ? error.message : "That document could not be loaded from local storage.");
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [clearDocxAssets, documentId, pushError]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+    queuePersistSnapshot({ isReady: isSessionReady, messages, selected, selectedFile, sessionCreatedAt, sessionDocumentId, sessionId });
+  }, [isSessionReady, messages, queuePersistSnapshot, selected, selectedFile, sessionCreatedAt, sessionDocumentId, sessionId]);
+
+  useEffect(
+    () => () => {
+      queuePersistSnapshot({
+        isReady: isSessionReadyRef.current,
+        messages: messagesRef.current,
+        selected: selectedRef.current,
+        selectedFile: selectedFileRef.current,
+        sessionCreatedAt: sessionCreatedAtRef.current,
+        sessionDocumentId: sessionDocumentIdRef.current,
+        sessionId: sessionIdRef.current,
+      });
+      stopAgent(false);
+      onStatusChangeRef.current?.("idle");
+      clearDocxAssets();
+    },
+    [clearDocxAssets, queuePersistSnapshot, stopAgent],
+  );
 
   async function processPdf(file: File): Promise<void> {
     if (!isPdfFile(file)) {
@@ -246,21 +312,45 @@ export default function DigestPage({
           pdfType: parsed.metrics.pdfType,
         },
       ];
-      const persistedMessages = messages
+      const persistedMessages = messagesRef.current
         .concat(additions)
         .map(serializeChatMessage)
         .filter((message): message is PersistedChatMessage => message !== null);
       const session: DigestSession = {
-        id: sessionId,
+        id: sessionIdRef.current,
         title: parsed.fileName,
         documentId: parsed.id,
-        createdAt: sessionCreatedAt,
+        createdAt: sessionCreatedAtRef.current,
         updatedAt: at,
         messages: persistedMessages,
       };
+      const thread: ChatThread = {
+        threadId: session.id,
+        documentId: parsed.id,
+        messages: persistedMessages,
+        createdAt: session.createdAt,
+        updatedAt: at,
+      };
+      if (sessionDocumentIdRef.current && sessionDocumentIdRef.current !== parsed.id) await removeDocument(sessionDocumentIdRef.current);
+      await putChatThread(thread);
       await putDigestSession(session, { document: parsed, file: stored }, Array.from(digestFilesRef.current.values()));
-      if (sessionDocumentId && sessionDocumentId !== parsed.id) await removeDocument(sessionDocumentId);
-      openSession(parsed, stored, additions);
+      setSelected(parsed);
+      setSelectedFile(stored);
+      setSessionDocumentId(parsed.id);
+      setSelectedNodeId(null);
+      setFocusRequest(null);
+      setStatus("idle");
+      setIsSessionReady(true);
+      setMessages([...messagesRef.current.filter((message) => message.kind !== "agent-stream"), ...additions]);
+      lastPersistedFingerprintRef.current = "";
+      onDocumentReady?.({
+        id: parsed.id,
+        fileName: parsed.fileName,
+        parsedAt: parsed.parsedAt,
+        pageCount: parsed.metrics.pageCount,
+        pdfType: parsed.metrics.pdfType,
+        nodeCount: flattenTree(parsed.root).length,
+      });
     } catch (error) {
       setStatus("error");
       pushError(error instanceof Error ? error.message : "This PDF could not be parsed.");
@@ -279,97 +369,6 @@ export default function DigestPage({
     const file = event.dataTransfer.files[0];
     if (file) void processPdf(file);
   }
-
-  async function handleSelect(targetSessionId: string): Promise<void> {
-    if (sessionId === targetSessionId) return;
-    agentRequestRef.current += 1;
-    const activeStreamMessageId = activeStreamMessageRef.current;
-    activeStreamMessageRef.current = null;
-    if (activeStreamMessageId) {
-      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
-    }
-    setAgentStatus("idle");
-    try {
-      const stored = await getDigestSession(targetSessionId);
-      if (!stored) {
-        setStatus("error");
-        pushError("That chat session could not be loaded from local storage.");
-        return;
-      }
-
-      clearDocxAssets();
-      const assets = new Map(stored.digestFiles.map((file) => [file.id, file]));
-      digestFilesRef.current = assets;
-      const restoredMessages: ChatMessage[] = stored.session.messages.map((message) => {
-        if (message.kind !== "digest") return message;
-        const asset = assets.get(message.docxFileId);
-        if (!asset) return message;
-        const docxUrl = URL.createObjectURL(asset.blob);
-        docxUrlsRef.current.add(docxUrl);
-        return { ...message, docxBlob: asset.blob, docxUrl };
-      });
-      lastPersistedFingerprintRef.current = "";
-      setSessionId(stored.session.id);
-      setSessionCreatedAt(stored.session.createdAt);
-      setSessionDocumentId(stored.session.documentId);
-      setIsSessionReady(true);
-      setSelected(stored.source?.document ?? null);
-      setSelectedFile(stored.source?.file ?? null);
-      setSelectedNodeId(null);
-      setFocusRequest(null);
-      setStatus("idle");
-      setDraft("");
-      setPreview(null);
-      setMessages(restoredMessages);
-    } catch {
-      setStatus("error");
-      pushError("That chat session could not be loaded from local storage.");
-    }
-  }
-
-  useEffect(() => {
-    if (!isSessionReady || blockedSessionIdsRef.current.has(sessionId)) return;
-    const persistedMessages = messages
-      .map(serializeChatMessage)
-      .filter((message): message is PersistedChatMessage => message !== null);
-    const documentId = selected?.id ?? sessionDocumentId;
-    const title = selected?.fileName ?? "New digest session";
-    const digestFiles = Array.from(digestFilesRef.current.values());
-    const fingerprint = JSON.stringify({
-      createdAt: sessionCreatedAt,
-      digestFiles: digestFiles.map((file) => ({ id: file.id, fileName: file.fileName })),
-      documentId,
-      messages: persistedMessages,
-      sessionId,
-      title,
-    });
-    if (fingerprint === lastPersistedFingerprintRef.current) return;
-    lastPersistedFingerprintRef.current = fingerprint;
-
-    const updatedAt = new Date().toISOString();
-    const session: DigestSession = {
-      id: sessionId,
-      title,
-      documentId,
-      createdAt: sessionCreatedAt,
-      updatedAt,
-      messages: persistedMessages,
-    };
-    const source = selected && selectedFile ? { document: selected, file: selectedFile } : undefined;
-    persistenceQueueRef.current = persistenceQueueRef.current
-      .catch(() => undefined)
-      .then(() => {
-        if (blockedSessionIdsRef.current.has(session.id)) return;
-        return putDigestSession(session, source, digestFiles);
-      })
-      .then(() => {
-        if (!blockedSessionIdsRef.current.has(session.id)) onSessionChange?.(summarizeDigestSession(session));
-      })
-      .catch(() => {
-        lastPersistedFingerprintRef.current = "";
-        onStorageError?.("IndexedDB could not save this chat session.");
-      });
-  }, [isSessionReady, messages, onSessionChange, onStorageError, selected, selectedFile, sessionCreatedAt, sessionDocumentId, sessionId]);
 
   function isDigestCommand(question: string): boolean {
     return question.trim().toLowerCase() === "/digest";
@@ -393,6 +392,16 @@ export default function DigestPage({
     const credentials = await getAgentRuntimeCredentials().catch(() => null);
     if (requestId !== agentRequestRef.current) return;
 
+    const requestOptions = {
+      onRequestId: (loaderRequestId: number) => {
+        if (requestId === agentRequestRef.current) {
+          activeAgentRequestIdRef.current = loaderRequestId;
+        } else {
+          cancelAgentRequest(loaderRequestId);
+        }
+      },
+    };
+
     if (isDigestCommand(question)) {
       if (!credentials) {
         pushError("Save an OpenRouter model and API key in Settings before running /digest.");
@@ -400,8 +409,9 @@ export default function DigestPage({
       }
 
       setAgentStatus("running");
+      let completed = false;
       try {
-        const result = await runCaseDigestAgent(selectedDocument.root, credentials);
+        const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
         if (requestId !== agentRequestRef.current) return;
 
         const markdown = caseDigestToMarkdown(result.digest);
@@ -409,7 +419,7 @@ export default function DigestPage({
         if (requestId !== agentRequestRef.current) return;
         const docxUrl = URL.createObjectURL(docxBlob);
         const messageId = makeMessageId();
-        const docxFileId = `${sessionId}-${messageId}`;
+        const docxFileId = `${sessionIdRef.current}-${messageId}`;
         const docxFileName = caseDigestFileName(result.digest.case_title);
         docxUrlsRef.current.add(docxUrl);
         digestFilesRef.current.set(docxFileId, {
@@ -433,12 +443,17 @@ export default function DigestPage({
           docxFileId,
           docxBlob,
         });
+        completed = true;
       } catch (error) {
         if (requestId === agentRequestRef.current) {
           pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
+          setAgentStatus("failed");
         }
       } finally {
-        if (requestId === agentRequestRef.current) setAgentStatus("idle");
+        if (requestId === agentRequestRef.current) {
+          activeAgentRequestIdRef.current = null;
+          if (completed) setAgentStatus("idle");
+        }
       }
       return;
     }
@@ -459,6 +474,7 @@ export default function DigestPage({
     const streamMessageId = makeMessageId();
     const streamStartedAt = Date.now();
     let latestAssistant = createInitialAssistantMessage();
+    let completed = false;
     activeStreamMessageRef.current = streamMessageId;
     pushMessage({
       id: streamMessageId,
@@ -485,7 +501,7 @@ export default function DigestPage({
             },
           };
         }));
-      });
+      }, requestOptions);
       if (requestId !== agentRequestRef.current) return;
       const execution: AgentExecution = {
         model: result.model,
@@ -505,6 +521,7 @@ export default function DigestPage({
         };
       }));
       activeStreamMessageRef.current = null;
+      completed = true;
     } catch (error) {
       if (requestId !== agentRequestRef.current) return;
       activeStreamMessageRef.current = null;
@@ -518,9 +535,13 @@ export default function DigestPage({
         query: question,
         refs: retrieveNodes(selectedDocument.root, question, 3),
       });
+      setAgentStatus("failed");
     } finally {
       if (activeStreamMessageRef.current === streamMessageId) activeStreamMessageRef.current = null;
-      if (requestId === agentRequestRef.current) setAgentStatus("idle");
+      if (requestId === agentRequestRef.current) {
+        activeAgentRequestIdRef.current = null;
+        if (completed) setAgentStatus("idle");
+      }
     }
   }
 
@@ -530,16 +551,9 @@ export default function DigestPage({
     void submitQuestion(draft);
   }
 
-  /** Stop a running agent request and tear down the worker. */
+  /** Stop this tab's running agent request without recycling the shared worker. */
   function handleCancelAgent(): void {
-    agentRequestRef.current += 1;
-    const activeStreamMessageId = activeStreamMessageRef.current;
-    activeStreamMessageRef.current = null;
-    if (activeStreamMessageId) {
-      setMessages((previous) => previous.filter((message) => message.id !== activeStreamMessageId));
-    }
-    setAgentStatus("idle");
-    disposeEngine();
+    stopAgent(true);
   }
 
   /** Reset the engine after it crashed so the next request starts fresh. */

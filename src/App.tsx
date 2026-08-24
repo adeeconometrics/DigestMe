@@ -1,16 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, RefObject } from "react";
-import {
-  hasOlderDigestSessions,
-  sortDigestSessionSummaries,
-  visibleDigestSessions,
-  type DigestSessionSummary,
-} from "./chat/session";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
-import { getDecksWithStarter, getDigestSessionSummaries, getSessions, putDeck, putSession, removeDeck, removeDigestSession, removeSessionsForDeck } from "./lib/db";
-import type { AppView, CsvValidationResult, Deck, Flashcard, Rating, StudySession } from "./types";
+import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
+import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
 import { requestPersistentStorageOnGesture } from "./lib/storagePersistence";
 
 const DigestPage = lazy(() => import("./pages/DigestPage"));
@@ -43,11 +37,22 @@ interface SessionStats {
   again: number;
 }
 
+interface DigestTab {
+  id: string;
+  documentId: string | null;
+}
+
+type DigestTabStatus = "idle" | "running" | "failed";
+
 const EMPTY_STATS: SessionStats = { reviewed: 0, known: 0, hard: 0, again: 0 };
 
 function makeId(prefix: string): string {
   const randomId = globalThis.crypto?.randomUUID?.();
   return `${prefix}-${randomId ?? Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+function newDigestTab(): DigestTab {
+  return { id: makeId("digest-tab"), documentId: null };
 }
 
 function buildStudyOrder(cards: Flashcard[], randomize: boolean): string[] {
@@ -109,11 +114,10 @@ export default function App() {
     }
   });
   const [openPanel, setOpenPanel] = useState<"sessions" | "decks" | null>(null);
-  const [sessionToken, setSessionToken] = useState(0);
-  const [focusSession, setFocusSession] = useState<{ id: string; nonce: number } | null>(null);
-  const [digestSessions, setDigestSessions] = useState<DigestSessionSummary[]>([]);
-  const [activeDigestSessionId, setActiveDigestSessionId] = useState<string | null>(null);
-  const [deletedDigestSessionId, setDeletedDigestSessionId] = useState<string | null>(null);
+  const [documentSummaries, setDocumentSummaries] = useState<DocumentSummary[]>([]);
+  const [digestTabs, setDigestTabs] = useState<DigestTab[]>([newDigestTab()]);
+  const [activeDigestTabId, setActiveDigestTabId] = useState(() => digestTabs[0].id);
+  const [digestTabStatuses, setDigestTabStatuses] = useState<Record<string, DigestTabStatus>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toggleRail(): void {
@@ -128,34 +132,53 @@ export default function App() {
     });
   }
 
-  function refreshDigestSessions(): void {
-    void getDigestSessionSummaries()
-      .then(setDigestSessions)
-      .catch(() => setDigestSessions([]));
-  }
-
-  const handleDigestSessionChange = useCallback((summary: DigestSessionSummary): void => {
-    setDigestSessions((previous) => sortDigestSessionSummaries([
-      ...previous.filter((candidate) => candidate.id !== summary.id),
-      summary,
-    ]));
-  }, []);
-
   function togglePanel(panel: "sessions" | "decks"): void {
-    if (panel === "sessions") refreshDigestSessions();
     setOpenPanel((current) => (current === panel ? null : panel));
   }
 
-  function openSession(sessionId: string): void {
+  function openDocument(documentId: string): void {
+    setDigestTabs((previous) => previous.some((tab) => tab.documentId === documentId) ? previous : [...previous, { id: documentId, documentId }]);
+    setActiveDigestTabId(documentId);
     setView("digest");
-    setFocusSession({ id: sessionId, nonce: Date.now() });
+    setOpenPanel(null);
   }
 
   function beginDigestSession(): void {
+    const tab = newDigestTab();
+    setDigestTabs((previous) => [...previous, tab]);
+    setActiveDigestTabId(tab.id);
     setView("digest");
-    setFocusSession(null);
-    setSessionToken((token) => token + 1);
+    setOpenPanel(null);
   }
+
+  function closeDigestTab(tabId: string): void {
+    const index = digestTabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return;
+    const remaining = digestTabs.filter((tab) => tab.id !== tabId);
+    if (remaining.length === 0) {
+      const replacement = newDigestTab();
+      setDigestTabs([replacement]);
+      setActiveDigestTabId(replacement.id);
+    } else {
+      setDigestTabs(remaining);
+      if (activeDigestTabId === tabId) setActiveDigestTabId(remaining[Math.min(index, remaining.length - 1)].id);
+    }
+    setDigestTabStatuses((previous) => {
+      const next = { ...previous };
+      delete next[tabId];
+      return next;
+    });
+  }
+
+  const handleDocumentReady = useCallback((tabId: string, summary: DocumentSummary): void => {
+    setDocumentSummaries((previous) => [summary, ...previous.filter((candidate) => candidate.id !== summary.id)]);
+    setDigestTabs((previous) => previous.map((tab) => tab.id === tabId ? { id: summary.id, documentId: summary.id } : tab));
+    setActiveDigestTabId(summary.id);
+  }, []);
+
+  const handleDigestTabStatus = useCallback((tabId: string, status: DigestTabStatus): void => {
+    setDigestTabStatuses((previous) => ({ ...previous, [tabId]: status }));
+  }, []);
 
   function openSettings(): void {
     setView("settings");
@@ -173,20 +196,21 @@ export default function App() {
     let mounted = true;
     async function hydrateWorkspace() {
       try {
-        const [storedDecks, storedSessions, storedDigestSessions] = await Promise.all([
+        const [storedDecks, storedSessions, storedDocuments] = await Promise.all([
           getDecksWithStarter(),
           getSessions(),
-          getDigestSessionSummaries(),
+          getDocumentSummaries(),
         ]);
         if (!mounted) return;
         setDecks(storedDecks);
         setSessionHistory(storedSessions);
-        setDigestSessions(storedDigestSessions);
+        setDocumentSummaries(storedDocuments);
         setActiveDeckId(storedDecks[0]?.id ?? null);
       } catch {
         if (!mounted) return;
         setStorageError("IndexedDB is unavailable. Changes will last until this page closes.");
         setDecks([STARTER_DECK]);
+        setDocumentSummaries([]);
         setActiveDeckId(STARTER_DECK.id);
       } finally {
         if (mounted) setIsLoading(false);
@@ -378,22 +402,6 @@ export default function App() {
     setToast(`${deck.name} was removed from this session.`);
   }
 
-  async function deleteDigestSession(sessionId: string): Promise<void> {
-    const session = digestSessions.find((candidate) => candidate.id === sessionId);
-    if (!session || !window.confirm(`Delete ${session.title}? Its chat, PDF, and generated DOCX files will be removed from this device.`)) return;
-
-    setDeletedDigestSessionId(sessionId);
-    try {
-      await removeDigestSession(sessionId);
-      setDigestSessions((previous) => previous.filter((candidate) => candidate.id !== sessionId));
-      if (activeDigestSessionId !== sessionId) setDeletedDigestSessionId(null);
-      setToast(`${session.title} was deleted.`);
-    } catch {
-      setDeletedDigestSessionId(null);
-      reportStorageFailure("The chat session could not be deleted from local storage.");
-    }
-  }
-
   function restartSession(shuffle = randomize) {
     if (!activeDeck) return;
     setStudyOrder(buildStudyOrder(activeDeck.cards, shuffle));
@@ -480,21 +488,21 @@ export default function App() {
   return (
     <div className={`app-shell ${railCollapsed ? "has-rail" : ""}`}>
       <Sidebar
+        activeDocumentId={digestTabs.find((tab) => tab.id === activeDigestTabId)?.documentId ?? null}
         activeDeckId={activeDeckId}
         collapsed={railCollapsed}
         decks={decks}
-        onDeleteDeck={deleteDeck}
-        onDeleteSession={deleteDigestSession}
+        documents={documentSummaries}
         onImport={openImporter}
         onNewSession={beginDigestSession}
-        onOpenSession={openSession}
+        onOpenDocument={openDocument}
         onOpenSettings={openSettings}
+        onDeleteDeck={deleteDeck}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
         onToggleCollapse={toggleRail}
         onTogglePanel={togglePanel}
         openPanel={openPanel}
-        sessions={digestSessions}
         view={view}
       />
 
@@ -562,13 +570,17 @@ export default function App() {
           />
         ) : view === "digest" ? (
           <Suspense fallback={<div className="loading-workspace"><span className="loading-orbit"><Icon name="spark" size={20} /></span><strong>Loading the digest bench...</strong><small>Preparing the local PDF parser</small></div>}>
-            <DigestPage
-              deletedSessionId={deletedDigestSessionId}
-              focusSession={focusSession}
-              onSessionChange={handleDigestSessionChange}
-              onSessionIdChange={setActiveDigestSessionId}
+            <DigestWorkspace
+              activeTabId={activeDigestTabId}
+              documents={documentSummaries}
+              onCloseTab={closeDigestTab}
+              onDocumentReady={handleDocumentReady}
+              onNewTab={beginDigestSession}
+              onStatusChange={handleDigestTabStatus}
               onStorageError={reportStorageFailure}
-              sessionToken={sessionToken}
+              onSelectTab={setActiveDigestTabId}
+              statuses={digestTabStatuses}
+              tabs={digestTabs}
             />
           </Suspense>
         ) : (
@@ -615,47 +627,113 @@ export default function App() {
   );
 }
 
+interface DigestWorkspaceProps {
+  activeTabId: string;
+  documents: DocumentSummary[];
+  onCloseTab: (tabId: string) => void;
+  onDocumentReady: (tabId: string, summary: DocumentSummary) => void;
+  onNewTab: () => void;
+  onSelectTab: (tabId: string) => void;
+  onStatusChange: (tabId: string, status: DigestTabStatus) => void;
+  onStorageError: (message: string) => void;
+  statuses: Record<string, DigestTabStatus>;
+  tabs: DigestTab[];
+}
+
+function DigestWorkspace({
+  activeTabId,
+  documents,
+  onCloseTab,
+  onDocumentReady,
+  onNewTab,
+  onSelectTab,
+  onStatusChange,
+  onStorageError,
+  statuses,
+  tabs,
+}: DigestWorkspaceProps) {
+  return (
+    <div className="digest-workspace">
+      <div aria-label="Open documents" className="digest-tabs" role="tablist">
+        {tabs.map((tab) => {
+          const document = tab.documentId ? documents.find((candidate) => candidate.id === tab.documentId) : undefined;
+          const status = statuses[tab.id] ?? "idle";
+          const title = document?.fileName ?? "New document";
+          return (
+            <div className={`digest-tab ${activeTabId === tab.id ? "is-active" : ""}`} key={tab.id}>
+              <button
+                aria-selected={activeTabId === tab.id}
+                className="digest-tab-select"
+                onClick={() => onSelectTab(tab.id)}
+                role="tab"
+                type="button"
+              >
+                <span className={`digest-tab-status is-${status}`} />
+                <span className="digest-tab-copy"><strong>{title}</strong><small>{document ? `${document.pageCount} pages` : "Attach a PDF"}</small></span>
+              </button>
+              <button aria-label={`Close ${title}`} className="digest-tab-close" onClick={() => onCloseTab(tab.id)} title={`Close ${title}`} type="button">
+                <Icon name="close" size={13} />
+              </button>
+            </div>
+          );
+        })}
+        <button aria-label="Open a new document tab" className="digest-tab-new" onClick={onNewTab} title="Open a new document tab" type="button">
+          <Icon name="plus" size={15} />
+        </button>
+      </div>
+      <div className="digest-tab-panels">
+        {tabs.map((tab) => (
+          <div aria-hidden={activeTabId !== tab.id} className="digest-tab-panel" hidden={activeTabId !== tab.id} key={tab.id} role="tabpanel">
+            <DigestPage
+              documentId={tab.documentId}
+              onDocumentReady={(summary) => onDocumentReady(tab.id, summary)}
+              onStatusChange={(status) => onStatusChange(tab.id, status)}
+              onStorageError={onStorageError}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface SidebarProps {
+  activeDocumentId: string | null;
   activeDeckId: string | null;
   collapsed: boolean;
   decks: Deck[];
+  documents: DocumentSummary[];
   openPanel: "sessions" | "decks" | null;
-  sessions: DigestSessionSummary[];
   view: AppView;
   onSetView: (view: AppView) => void;
   onToggleCollapse: () => void;
   onTogglePanel: (panel: "sessions" | "decks") => void;
-  onOpenSession: (sessionId: string) => void;
+  onOpenDocument: (documentId: string) => void;
   onOpenSettings: () => void;
   onNewSession: () => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
-  onDeleteSession: (sessionId: string) => void;
 }
 
 function Sidebar({
+  activeDocumentId,
   activeDeckId,
   collapsed,
   decks,
+  documents,
   onDeleteDeck,
-  onDeleteSession,
   onImport,
   onNewSession,
-  onOpenSession,
+  onOpenDocument,
   onOpenSettings,
   onSelectDeck,
   onSetView,
   onToggleCollapse,
   onTogglePanel,
   openPanel,
-  sessions,
   view,
 }: SidebarProps) {
-  const [showAllSessions, setShowAllSessions] = useState(false);
-  const recentSessions = visibleDigestSessions(sessions, showAllSessions);
-  const hasOlderSessions = hasOlderDigestSessions(sessions);
-
   return (
     <aside className={`sidebar ${collapsed ? "is-rail" : ""}`}>
       <button
@@ -690,7 +768,6 @@ function Sidebar({
           className={`nav-item nav-trigger ${openPanel === "sessions" ? "is-open" : ""} ${view === "digest" ? "active" : ""}`}
           onClick={() => {
             onSetView("digest");
-            if (!collapsed && openPanel !== "sessions") setShowAllSessions(false);
             if (!collapsed) onTogglePanel("sessions");
           }}
           title={collapsed ? "Case digest" : undefined}
@@ -701,33 +778,24 @@ function Sidebar({
           <Icon className="panel-caret" name="chevron-down" size={14} />
         </button>
         {!collapsed && openPanel === "sessions" && (
-          <div className={`sub-panel session-sub-panel ${hasOlderSessions ? "has-session-history" : ""}`}>
-            {sessions.length ? (
+          <div className="sub-panel session-sub-panel">
+            {documents.length ? (
               <div className="session-history-list">
-                {recentSessions.map((session) => (
-                  <div className="sub-row session-sub-row" key={session.id}>
-                    <button className="sub-item session-sub-item" onClick={() => onOpenSession(session.id)} type="button">
+                {documents.map((document) => (
+                  <div className={`sub-row session-sub-row ${activeDocumentId === document.id ? "active" : ""}`} key={document.id}>
+                    <button className="sub-item session-sub-item" onClick={() => onOpenDocument(document.id)} type="button">
                       <Icon name="tree" size={13} />
-                      <span className="session-sub-copy"><strong>{session.title}</strong><small>{formatDate(session.updatedAt)}</small></span>
-                    </button>
-                    <button aria-label={`Delete ${session.title}`} className="sub-remove" onClick={() => onDeleteSession(session.id)} title="Delete session" type="button">
-                      <Icon name="trash" size={12} />
+                      <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages</small></span>
                     </button>
                   </div>
                 ))}
-                {hasOlderSessions && (
-                  <button className="sub-item session-history-toggle" onClick={() => setShowAllSessions((expanded) => !expanded)} type="button">
-                    <Icon name={showAllSessions ? "chevron-up" : "chevron-down"} size={13} />
-                    <span>{showAllSessions ? "Show recent sessions" : `View previous sessions (${sessions.length - recentSessions.length})`}</span>
-                  </button>
-                )}
               </div>
             ) : (
-              <p className="sub-empty">No chat sessions yet.</p>
+              <p className="sub-empty">No documents yet.</p>
             )}
             <button className="sub-item sub-new" onClick={onNewSession} type="button">
               <Icon name="plus" size={13} />
-              <span>New session</span>
+              <span>Open document</span>
             </button>
           </div>
         )}

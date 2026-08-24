@@ -2800,6 +2800,147 @@ input:focus-visible,
 
 /* ---------------------------------- digest session layout ---------------------------------- */
 
+.digest-workspace {
+  display: flex;
+  width: 100%;
+  max-width: 1780px;
+  height: max(600px, calc(100vh - 40px));
+  margin: 0 auto;
+  padding: 13px clamp(14px, 1.8vw, 26px) 20px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.digest-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.digest-tab {
+  display: flex;
+  min-width: 170px;
+  max-width: 270px;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.45);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.digest-tab.is-active {
+  border-color: rgba(184, 216, 86, 0.75);
+  background: var(--paper-bright);
+  box-shadow: 0 5px 16px rgba(29, 52, 50, 0.06);
+}
+
+.digest-tab-select {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 11px;
+  background: transparent;
+  text-align: left;
+}
+
+.digest-tab-status {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.digest-tab-status.is-running {
+  background: var(--lime-dark);
+  box-shadow: 0 0 0 3px rgba(184, 216, 86, 0.18);
+  animation: agent-pulse 900ms ease-in-out infinite alternate;
+}
+
+.digest-tab-status.is-failed {
+  background: var(--peach);
+  box-shadow: 0 0 0 3px rgba(255, 154, 128, 0.16);
+}
+
+.digest-tab-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.digest-tab-copy strong,
+.digest-tab-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digest-tab-copy strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.digest-tab-copy small {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.digest-tab-close,
+.digest-tab-new {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  background: transparent;
+}
+
+.digest-tab-close {
+  width: 30px;
+  border-left: 1px solid transparent;
+  border-radius: 0 12px 12px 0;
+}
+
+.digest-tab-close:hover {
+  border-left-color: var(--line);
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+
+.digest-tab-new {
+  width: 36px;
+  min-height: 42px;
+  border: 1px dashed rgba(29, 52, 50, 0.25);
+  border-radius: 12px;
+}
+
+.digest-tab-new:hover {
+  border-color: var(--lime-dark);
+  background: rgba(218, 250, 113, 0.2);
+  color: var(--ink);
+}
+
+.digest-tab-panels {
+  min-height: 0;
+  flex: 1;
+}
+
+.digest-tab-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.digest-tab-panel > .digest-session {
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
 .digest-session {
   display: grid;
   grid-template-columns: minmax(360px, 1fr) minmax(0, 1.05fr);
@@ -3611,6 +3752,10 @@ input:focus-visible,
 }
 
 @media (max-width: 1024px) {
+  .digest-workspace {
+    height: auto;
+  }
+
   .digest-session {
     grid-template-columns: 1fr;
     height: auto;
@@ -4573,6 +4718,14 @@ input:focus-visible,
 }
 
 @media (max-width: 590px) {
+  .digest-workspace {
+    padding: 8px 15px 15px;
+  }
+
+  .digest-tab {
+    min-width: 150px;
+  }
+
   .settings-page {
     padding-top: 12px;
   }
