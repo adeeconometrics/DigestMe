@@ -237,7 +237,6 @@ async function loadEngine(): Promise<PyodideAPI> {
   let persistentRuntime: PersistentRuntime | undefined;
   const pyodide = await loadPyodide({
     indexURL: PYODIDE_INDEX_URL,
-    packages: ["micropip"],
     stdout: () => undefined,
     stderr: () => undefined,
     fsInit: async (fs, info) => {
@@ -268,6 +267,7 @@ async function loadEngine(): Promise<PyodideAPI> {
 
   if (!usePersistentRuntime) {
     postStatus("loading", "Installing the case-digest agent...");
+    await pyodide.loadPackage("micropip");
     await pyodide.runPythonAsync(`
 import micropip
 await micropip.install(["httpcore2==2.12.0", "pydantic-ai-slim[openrouter]==2.33.0"])
