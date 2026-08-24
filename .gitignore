@@ -11,6 +11,10 @@ dump/
 
 opencode.jsonc
 
+# Local lint tooling (agent-only; CI uses .oxlintrc.ci.json)
+tools/
+.oxlintrc.json
+
 *.pdf
 *.docx
 *.csv
