@@ -1,3 +1,5 @@
+import type { WireValue } from "../types";
+import { isWireString } from "../types";
 import {
   AlignmentType,
   BorderStyle,
@@ -17,7 +19,7 @@ import {
   VerticalAlignTable,
   WidthType,
 } from "docx";
-import type { FileChild, IParagraphOptions, ParagraphChild, TableVerticalAlign } from "docx";
+import type { FileChild, IParagraphOptions, ISectionOptions, ParagraphChild, TableVerticalAlign } from "docx";
 
 /** Facts are grouped to mirror the FACTS section in the case-digest template. */
 export interface CaseDigestFacts {
@@ -131,19 +133,19 @@ const JUSTIFIED_CELL_TEXT: IParagraphOptions = {
   spacing: BODY_SPACING,
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requiredString(record: Record<string, unknown>, key: string, path = key): string {
+function requiredString(record: Record<string, WireValue>, key: string, path = key): string {
   const value = record[key];
-  if (typeof value !== "string") {
+  if (!isWireString(value)) {
     throw new TypeError(`Expected ${path} to be a string.`);
   }
   return value;
 }
 
-function requiredStringArray(record: Record<string, unknown>, key: string, path = key): string[] {
+function requiredStringArray(record: Record<string, WireValue>, key: string, path = key): string[] {
   const value = record[key];
   if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
     throw new TypeError(`Expected ${path} to be an array of strings.`);
@@ -151,7 +153,7 @@ function requiredStringArray(record: Record<string, unknown>, key: string, path 
   return value;
 }
 
-function parseFacts(value: unknown): CaseDigestFacts {
+function parseFacts(value: WireValue): CaseDigestFacts {
   if (!isRecord(value)) {
     throw new TypeError("Expected facts to be an object.");
   }
@@ -170,14 +172,14 @@ function parseFacts(value: unknown): CaseDigestFacts {
   return facts;
 }
 
-function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
+function parseIssue(value: WireValue, index: number): CaseDigestIssueInput {
   const path = `issues[${index}]`;
 
   if (Array.isArray(value)) {
-    if (value.length !== 2 || value.some((item) => typeof item !== "string")) {
+    if (value.length !== 2 || value.some((item) => !isWireString(item))) {
       throw new TypeError(`Expected ${path} to be a [ruling, ratio] string pair.`);
     }
-    return [value[0], value[1]];
+    return [String(value[0]), String(value[1])];
   }
 
   if (!isRecord(value)) {
@@ -194,7 +196,7 @@ function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
   return issue;
 }
 
-function parseIssues(value: unknown): CaseDigestIssueInput[] {
+function parseIssues(value: WireValue): CaseDigestIssueInput[] {
   if (!Array.isArray(value)) {
     throw new TypeError("Expected issues to be an array.");
   }
@@ -202,8 +204,8 @@ function parseIssues(value: unknown): CaseDigestIssueInput[] {
 }
 
 /** Validate and type a parsed object or a JSON string before rendering it. */
-export function parseCaseDigestJson(input: unknown): CaseDigest {
-  const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
+export function parseCaseDigestJson(input: WireValue): CaseDigest {
+  const value: WireValue = isWireString(input) ? JSON.parse(input) : input;
   if (!isRecord(value)) {
     throw new TypeError("Expected case-digest JSON to be an object.");
   }
@@ -339,10 +341,11 @@ function cell(children: readonly (Paragraph | Table)[], options: CellOptions = {
 }
 
 function row(children: readonly TableCell[], height?: number): TableRow {
-  return new TableRow({
-    children,
-    ...(height === undefined ? {} : { height: { value: height, rule: HeightRule.ATLEAST } }),
-  });
+  return new TableRow(
+    height === undefined
+      ? { children }
+      : { children, height: { value: height, rule: HeightRule.ATLEAST } },
+  );
 }
 
 function table(rows: readonly TableRow[], columnWidths: number[], width: number): Table {
@@ -583,7 +586,7 @@ export function createCaseDigestDocument(
   caseDigest: CaseDigest,
   options: CaseDigestDocxOptions = {},
 ): Document {
-  const section = {
+  const section: ISectionOptions = {
     properties: {
       page: {
         size: { width: 12240, height: 15840 },
@@ -593,10 +596,10 @@ export function createCaseDigestDocument(
     children: renderBody(caseDigest),
     ...(options.headerText
       ? { headers: { default: new Header({ children: [headerFooterParagraph(options.headerText)] }) } }
-      : {}),
+      : null),
     ...(options.footerText
       ? { footers: { default: new Footer({ children: [headerFooterParagraph(options.footerText)] }) } }
-      : {}),
+      : null),
   };
 
   return new Document({
@@ -618,7 +621,7 @@ export function renderCaseDigestDocx(
 
 /** Parse raw JSON and pack it into a browser Blob in one step. */
 export function caseDigestJsonToDocx(
-  input: unknown,
+  input: WireValue,
   options: CaseDigestDocxOptions = {},
 ): Promise<Blob> {
   return renderCaseDigestDocx(parseCaseDigestJson(input), options);

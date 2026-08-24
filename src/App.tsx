@@ -9,12 +9,12 @@ import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Ra
 const DigestPage = lazy(() => import("./pages/DigestPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
-const VIEW_ROUTES: Record<AppView, string> = {
+const VIEW_ROUTES = {
   study: "#/study",
   library: "#/library",
   digest: "#/digest",
   settings: "#/settings",
-};
+} satisfies Record<AppView, string>;
 
 function viewFromHash(hash: string): AppView {
   if (hash === "#/library") return "library";
@@ -262,14 +262,15 @@ export default function App() {
   function saveActiveSession(stats: SessionStats, completed = false) {
     if (!activeDeck || !activeSessionId || !sessionStartedAt) return;
     const updatedAt = new Date().toISOString();
-    persistSession({
+    const session: StudySession = {
       id: activeSessionId,
       deckId: activeDeck.id,
       startedAt: sessionStartedAt,
       updatedAt,
-      ...(completed ? { completedAt: updatedAt } : {}),
       ...stats,
-    });
+    };
+    if (completed) session.completedAt = updatedAt;
+    persistSession(session);
   }
 
   async function processFile(file: File) {

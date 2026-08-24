@@ -21,6 +21,7 @@ import { disposeEngine, runCaseDigestAgent, streamChatAgent, subscribeEngineStat
 import type { AgentExecution } from "../pyodide/types";
 
 const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer"));
+const DocxPreviewModal = lazy(() => import("../components/DocxPreviewModal"));
 
 type DigestStatus = "idle" | "parsing" | "error";
 type AgentStatus = "idle" | "running" | "failed";
@@ -70,6 +71,7 @@ type ChatMessage =
       execution: AgentExecution;
       docxUrl: string;
       docxFileName: string;
+      docxBlob: Blob;
     });
 
 function makeMessageId(): string {
@@ -79,6 +81,12 @@ function makeMessageId(): string {
 
 function welcomeMessage(): ChatMessage {
   return { id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "welcome" };
+}
+
+interface DigestPreview {
+  blob: Blob;
+  fileName: string;
+  downloadUrl: string;
 }
 
 interface DigestPageProps {
@@ -98,6 +106,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
   const [draft, setDraft] = useState("");
+  const [preview, setPreview] = useState<DigestPreview | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -311,6 +320,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
           execution: { model: result.model, elapsedMs: result.elapsedMs },
           docxUrl,
           docxFileName: caseDigestFileName(result.digest.case_title),
+          docxBlob,
         });
       } catch (error) {
         if (requestId === agentRequestRef.current) {
@@ -432,6 +442,11 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
     setFocusRequest({ nodeId: hit.nodeId, nonce: Date.now() });
   }
 
+  /** Open the popup viewer for a generated digest so it can be checked first. */
+  function handlePreviewDigest(message: Extract<ChatMessage, { kind: "digest" }>): void {
+    setPreview({ blob: message.docxBlob, fileName: message.docxFileName, downloadUrl: message.docxUrl });
+  }
+
   function handleGraphNodeSelect(node: { id: string }): void {
     setSelectedNodeId(node.id);
   }
@@ -469,6 +484,7 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
             <ChatBubble
               key={message.id}
               message={message}
+              onPreviewDocx={handlePreviewDigest}
               onReferenceClick={handleReferenceClick}
             />
           ))}
@@ -569,16 +585,28 @@ export default function DigestPage({ sessionToken = 0, focusDoc = null }: Digest
           <p>Attach a PDF in the chat and its context map plus full document will appear here.</p>
         </aside>
       )}
+
+      {preview && (
+        <Suspense fallback={null}>
+          <DocxPreviewModal
+            blob={preview.blob}
+            downloadUrl={preview.downloadUrl}
+            fileName={preview.fileName}
+            onClose={() => setPreview(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
 
 interface ChatBubbleProps {
   message: ChatMessage;
+  onPreviewDocx: (message: Extract<ChatMessage, { kind: "digest" }>) => void;
   onReferenceClick: (hit: RetrievalHit) => void;
 }
 
-function ChatBubble({ message, onReferenceClick }: ChatBubbleProps) {
+function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="chat-row is-user">
@@ -664,8 +692,11 @@ function ChatBubble({ message, onReferenceClick }: ChatBubbleProps) {
           <>
             <MarkdownBody markdown={message.markdown} />
             <div className="digest-download-row">
+              <button className="digest-preview" onClick={() => onPreviewDocx(message)} type="button">
+                <Icon name="book" size={14} /> Preview
+              </button>
               <a className="digest-download" download={message.docxFileName} href={message.docxUrl}>
-                <Icon name="book" size={14} /> Download DOCX
+                <Icon name="upload" size={14} /> Download
               </a>
             </div>
             <AgentExecutionMeta execution={message.execution} />
@@ -728,8 +759,8 @@ function ToolCallActivity({ tool, isStreaming }: { tool: AgentToolPart; isStream
   );
 }
 
-function displayStreamValue(value: unknown): string {
-  if (typeof value === "string") return value;
+function displayStreamValue<T>(value: T): string {
+  if (Object.prototype.toString.call(value) === "[object String]") return String(value);
   const serialized = JSON.stringify(value);
   return serialized ?? String(value);
 }

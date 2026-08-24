@@ -1,3 +1,5 @@
+import { isWireNumber, isWireString, type WireValue } from "../types";
+
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
 export interface OpenRouterModelOption {
@@ -7,34 +9,22 @@ export interface OpenRouterModelOption {
   contextLength?: number;
 }
 
-interface ModelRecord {
-  id?: unknown;
-  name?: unknown;
-  description?: unknown;
-  context_length?: unknown;
-}
-
-interface ModelsResponse {
-  data?: unknown;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null;
 }
 
-function parseModel(value: unknown): OpenRouterModelOption | null {
+function parseModel(value: WireValue): OpenRouterModelOption | null {
   if (!isRecord(value)) return null;
 
-  const model = value as ModelRecord;
-  if (typeof model.id !== "string" || !model.id.trim()) return null;
+  if (!isWireString(value.id) || !value.id.trim()) return null;
 
   const option: OpenRouterModelOption = {
-    id: model.id,
-    name: typeof model.name === "string" && model.name.trim() ? model.name : model.id,
+    id: value.id,
+    name: isWireString(value.name) && value.name.trim() ? value.name : value.id,
   };
-  if (typeof model.description === "string" && model.description.trim()) option.description = model.description;
-  if (typeof model.context_length === "number" && Number.isFinite(model.context_length)) {
-    option.contextLength = model.context_length;
+  if (isWireString(value.description) && value.description.trim()) option.description = value.description;
+  if (isWireNumber(value.context_length) && Number.isFinite(value.context_length)) {
+    option.contextLength = value.context_length;
   }
   return option;
 }
@@ -54,7 +44,7 @@ export async function fetchOpenRouterModels(signal?: AbortSignal, cache: Request
   });
   if (!response.ok) throw new Error(`OpenRouter returned ${response.status} while loading models.`);
 
-  let payload: unknown;
+  let payload: WireValue;
   try {
     payload = await response.json();
   } catch {
@@ -62,7 +52,7 @@ export async function fetchOpenRouterModels(signal?: AbortSignal, cache: Request
   }
 
   if (!isRecord(payload)) throw new Error("OpenRouter returned an invalid model catalog.");
-  const data = (payload as ModelsResponse).data;
+  const data = payload.data;
   if (!Array.isArray(data)) throw new Error("OpenRouter returned an invalid model catalog.");
 
   return data

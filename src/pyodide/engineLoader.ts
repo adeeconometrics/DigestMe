@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "assistant-stream";
 import type { DocumentNode } from "../parser";
+import type { WireValue } from "../types";
 import { createChatStreamAccumulator } from "../chat/agentStream";
 import {
   parseCaseDigestAgentResult,
@@ -18,16 +19,25 @@ interface WorkerStatusMessage {
   message?: string;
 }
 
+interface WorkerHeartbeatMessage {
+  type: "heartbeat";
+}
+
+interface WorkerStartedMessage {
+  type: "started";
+  requestId: number;
+}
+
 interface WorkerResultMessage {
   type: "result";
   requestId: number;
-  result: unknown;
+  result: WireValue;
 }
 
 interface WorkerStreamMessage {
   type: "stream";
   requestId: number;
-  event: unknown;
+  event: WireValue;
 }
 
 interface WorkerErrorMessage {
@@ -36,17 +46,32 @@ interface WorkerErrorMessage {
   message: string;
 }
 
-type WorkerResponse = WorkerStatusMessage | WorkerStreamMessage | WorkerResultMessage | WorkerErrorMessage;
+type WorkerResponse =
+  | WorkerStatusMessage
+  | WorkerHeartbeatMessage
+  | WorkerStartedMessage
+  | WorkerStreamMessage
+  | WorkerResultMessage
+  | WorkerErrorMessage;
 
 interface PendingRequest {
-  resolve: (value: unknown) => void;
+  resolve: (value: WireValue) => void;
   reject: (reason: Error) => void;
-  onStream?: (event: unknown) => void;
-  timer: ReturnType<typeof setTimeout>;
+  onStream?: (event: WireValue) => void;
+  /** Whether the worker acknowledged execution; queued requests ride the boot watchdog instead. */
+  started: boolean;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
-/** How long a single agent request may run before the worker is discarded. */
-const REQUEST_TIMEOUT_MS = 120_000;
+/** Kill a request only after this much worker silence — not total runtime. */
+const REQUEST_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Separate, generous budget for booting the runtime (pyodide download plus
+ * micropip install of pydantic-ai) so cold starts are not charged against
+ * the request's inactivity window.
+ */
+const ENGINE_LOAD_TIMEOUT_MS = 600_000;
 
 let worker: Worker | null = null;
 let requestSequence = 0;
@@ -68,16 +93,65 @@ function rejectPending(error: Error): void {
   }
 }
 
+function currentWindowMs(pending: PendingRequest): number {
+  return pending.started ? REQUEST_IDLE_TIMEOUT_MS : ENGINE_LOAD_TIMEOUT_MS;
+}
+
+function armRequestTimer(requestId: number, pending: PendingRequest): void {
+  const windowMs = currentWindowMs(pending);
+  clearTimeout(pending.timer);
+  pending.timer = setTimeout(() => {
+    // Delete first so a late stream event cannot revive an expired request.
+    pendingRequests.delete(requestId);
+    const remainingRequests = pendingRequests.size;
+    pending.reject(
+      new Error(
+        `The agent stopped responding (${Math.round(windowMs / 1000)}s without progress). Please try again.`,
+      ),
+    );
+    if (remainingRequests === 0 && worker) {
+      // Nothing left to protect and the runtime went silent: recycle it so
+      // the next request gets a healthy runtime instead of a wedged queue.
+      worker.terminate();
+      worker = null;
+      setEngineStatus({ state: "idle" });
+    }
+  }, windowMs);
+}
+
+/** Refresh every pending request's deadline after any sign of worker life. */
+function refreshPendingTimers(): void {
+  for (const [requestId, pending] of pendingRequests) armRequestTimer(requestId, pending);
+}
+
 function createWorker(): Worker {
   const nextWorker = new Worker(new URL("./engineWorker.ts", import.meta.url), { type: "module" });
   nextWorker.onmessage = (event: MessageEvent<WorkerResponse>) => {
     const message = event.data;
     if (message.type === "status") {
-      setEngineStatus({ state: message.state, ...(message.message ? { message: message.message } : {}) });
+      if (message.state !== "idle") refreshPendingTimers();
+      const status: EngineStatus = { state: message.state };
+      if (message.message) status.message = message.message;
+      setEngineStatus(status);
+      return;
+    }
+
+    if (message.type === "heartbeat") {
+      // Liveness proof from a busy runtime (e.g. a silent non-streaming run).
+      refreshPendingTimers();
+      return;
+    }
+
+    if (message.type === "started") {
+      const pending = pendingRequests.get(message.requestId);
+      if (!pending) return;
+      pending.started = true;
+      armRequestTimer(message.requestId, pending);
       return;
     }
 
     if (message.type === "stream") {
+      refreshPendingTimers();
       const pending = pendingRequests.get(message.requestId);
       if (!pending?.onStream) return;
       try {
@@ -107,7 +181,7 @@ function createWorker(): Worker {
   return nextWorker;
 }
 
-function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void): Promise<unknown> {
+function requestAgent(request: AgentRequest, onStream?: (event: WireValue) => void): Promise<WireValue> {
   const activeWorker = worker ?? (worker = createWorker());
   const requestId = ++requestSequence;
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
@@ -127,15 +201,9 @@ function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void
       return;
     }
 
-    const timer = setTimeout(() => {
-      pendingRequests.delete(requestId);
-      reject(new Error("The agent request timed out."));
-      activeWorker.terminate();
-      if (worker === activeWorker) worker = null;
-      rejectPending(new Error("The browser agent timed out and was stopped."));
-      setEngineStatus({ state: "idle" });
-    }, REQUEST_TIMEOUT_MS);
-    pendingRequests.set(requestId, { resolve, reject, onStream, timer });
+    const pending: PendingRequest = { resolve, reject, onStream, started: false };
+    pendingRequests.set(requestId, pending);
+    armRequestTimer(requestId, pending);
   });
 }
 

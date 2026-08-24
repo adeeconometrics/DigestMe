@@ -1,7 +1,7 @@
 const SERVICE_WORKER_READY_TIMEOUT_MS = 3000;
 
 export async function registerPyodideServiceWorker(): Promise<void> {
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  if (!("navigator" in globalThis) || !("serviceWorker" in navigator)) return;
 
   try {
     await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}pyodide-service-worker.js`, {

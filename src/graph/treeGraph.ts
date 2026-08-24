@@ -9,11 +9,11 @@ export interface TreeNodePayload extends Attributes {
   page: number | null;
 }
 
-export const NODE_COLORS: Record<DocumentNode["kind"], string> = {
+export const NODE_COLORS = {
   document: "#1d3432",
   section: "#b8d856",
   block: "#bfe5eb",
-};
+} satisfies Record<DocumentNode["kind"], string>;
 
 /** Base edge styling: thin and fully opaque so hierarchy stays legible. */
 export const EDGE_BASE = {
@@ -32,11 +32,11 @@ export const EDGE_DIMMED = {
   color: "rgba(29, 52, 50, 0.18)",
 } as const;
 
-const NODE_SIZES: Record<DocumentNode["kind"], number> = {
+const NODE_SIZES = {
   document: 14,
   section: 8,
   block: 4,
-};
+} satisfies Record<DocumentNode["kind"], number>;
 
 /**
  * Maps a parsed document context tree onto a graphology graph:
