@@ -58,9 +58,14 @@ interface PendingRequest {
   resolve: (value: WireValue) => void;
   reject: (reason: Error) => void;
   onStream?: (event: WireValue) => void;
+  worker: Worker;
   /** Whether the worker acknowledged execution; queued requests ride the boot watchdog instead. */
   started: boolean;
   timer?: ReturnType<typeof setTimeout>;
+}
+
+export interface AgentRequestOptions {
+  onRequestId?: (requestId: number) => void;
 }
 
 /** Kill a request only after this much worker silence — not total runtime. */
@@ -181,13 +186,19 @@ function createWorker(): Worker {
   return nextWorker;
 }
 
-function requestAgent(request: AgentRequest, onStream?: (event: WireValue) => void): Promise<WireValue> {
+function requestAgent(
+  request: AgentRequest,
+  onStream?: (event: WireValue) => void,
+  options?: AgentRequestOptions,
+): Promise<WireValue> {
   const activeWorker = worker ?? (worker = createWorker());
   const requestId = ++requestSequence;
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });
 
   return new Promise((resolve, reject) => {
     const { credentials, ...command } = request;
+    const pending: PendingRequest = { resolve, reject, onStream, worker: activeWorker, started: false };
+    pendingRequests.set(requestId, pending);
     try {
       activeWorker.postMessage({
         requestId,
@@ -197,13 +208,13 @@ function requestAgent(request: AgentRequest, onStream?: (event: WireValue) => vo
         apiKey: credentials.apiKey,
       });
     } catch (error) {
+      pendingRequests.delete(requestId);
       reject(error instanceof Error ? error : new Error("The browser agent could not accept the request."));
       return;
     }
-
-    const pending: PendingRequest = { resolve, reject, onStream, started: false };
-    pendingRequests.set(requestId, pending);
+    if (pendingRequests.get(requestId) !== pending) return;
     armRequestTimer(requestId, pending);
+    options?.onRequestId?.(requestId);
   });
 }
 
@@ -221,8 +232,9 @@ export async function runChatAgent(
   root: DocumentNode,
   question: string,
   credentials: AgentCredentials,
+  options?: AgentRequestOptions,
 ): Promise<ChatAgentResult> {
-  return parseChatAgentResult(await requestAgent({ command: "chat", root, question, credentials }));
+  return parseChatAgentResult(await requestAgent({ command: "chat", root, question, credentials }, undefined, options));
 }
 
 export async function streamChatAgent(
@@ -230,6 +242,7 @@ export async function streamChatAgent(
   question: string,
   credentials: AgentCredentials,
   onUpdate: (message: AssistantMessage) => void,
+  options?: AgentRequestOptions,
 ): Promise<ChatAgentResult> {
   const stream = createChatStreamAccumulator(onUpdate);
   try {
@@ -237,6 +250,7 @@ export async function streamChatAgent(
       await requestAgent(
         { command: "chat", root, question, credentials },
         (event) => stream.push(parseChatStreamEvent(event)),
+        options,
       ),
     );
     await stream.finish();
@@ -250,8 +264,22 @@ export async function streamChatAgent(
 export async function runCaseDigestAgent(
   root: DocumentNode,
   credentials: AgentCredentials,
+  options?: AgentRequestOptions,
 ): Promise<CaseDigestAgentResult> {
-  return parseCaseDigestAgentResult(await requestAgent({ command: "digest", root, credentials }));
+  return parseCaseDigestAgentResult(await requestAgent({ command: "digest", root, credentials }, undefined, options));
+}
+
+export function cancelAgentRequest(requestId: number): void {
+  const pending = pendingRequests.get(requestId);
+  if (!pending) return;
+  pendingRequests.delete(requestId);
+  clearTimeout(pending.timer);
+  pending.reject(new Error("The browser agent request was cancelled."));
+  try {
+    pending.worker.postMessage({ command: "cancel", requestId });
+  } catch {
+    return;
+  }
 }
 
 export function disposeEngine(): void {

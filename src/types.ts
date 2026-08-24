@@ -57,7 +57,7 @@ export type WireValue =
   | { [key: string]: WireValue };
 
 /** Type guards for values arriving at a wire boundary; the only place raw typeof checks belong. */
-export function isWireString(value: WireValue): value is string {
+export function isWireString(value: unknown): value is string {
   return typeof value === "string";
 }
 
@@ -77,6 +77,14 @@ export function isWireNonNegativeInteger(value: WireValue): value is number {
 /** True when the value is a non-null, non-array object record from the wire. */
 export function isWireRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isWireValue(value: unknown): value is WireValue {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.every(isWireValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value).every(isWireValue);
 }
 
 export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";

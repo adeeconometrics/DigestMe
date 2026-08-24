@@ -2,6 +2,7 @@ import { STARTER_DECK } from "../data/starter";
 import {
   sortDigestSessionSummaries,
   summarizeDigestSession,
+  type ChatThread,
   type DigestSession,
   type DigestSessionAsset,
   type DigestSessionSummary,
@@ -12,13 +13,14 @@ import { flattenTree } from "../parser";
 import type { Deck, DocumentSummary, StudySession } from "../types";
 
 const DATABASE_NAME = "recall-studio";
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 const DECK_STORE = "decks";
 const SESSION_STORE = "sessions";
 const META_STORE = "meta";
 const DOCUMENT_STORE = "documents";
 const DOCUMENT_FILE_STORE = "documentFiles";
 const CHAT_SESSION_STORE = "chatSessions";
+const CHAT_STORE = "chats";
 const DIGEST_FILE_STORE = "digestFiles";
 const STARTER_SEEDED_KEY = "starter-seeded";
 
@@ -47,6 +49,17 @@ function legacyDigestSession(document: ParsedDocument): DigestSession {
     createdAt: at,
     updatedAt: at,
     messages,
+  };
+}
+
+function chatThreadFromDigestSession(session: DigestSession): ChatThread | undefined {
+  if (!session.documentId) return undefined;
+  return {
+    threadId: session.id,
+    documentId: session.documentId,
+    messages: session.messages,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
   };
 }
 
@@ -88,6 +101,7 @@ function openDatabase(): Promise<IDBDatabase> {
       const database = request.result;
       const hadDocumentStore = database.objectStoreNames.contains(DOCUMENT_STORE);
       const hadChatSessionStore = database.objectStoreNames.contains(CHAT_SESSION_STORE);
+      const hadChatStore = database.objectStoreNames.contains(CHAT_STORE);
       if (!database.objectStoreNames.contains(DECK_STORE)) {
         database.createObjectStore(DECK_STORE, { keyPath: "id" });
       }
@@ -127,6 +141,11 @@ function openDatabase(): Promise<IDBDatabase> {
         chatSessions.createIndex("updatedAt", "updatedAt", { unique: false });
         chatSessions.createIndex("documentId", "documentId", { unique: false });
       }
+      if (!database.objectStoreNames.contains(CHAT_STORE)) {
+        const chats = database.createObjectStore(CHAT_STORE, { keyPath: "threadId" });
+        chats.createIndex("updatedAt", "updatedAt", { unique: false });
+        chats.createIndex("documentId", "documentId", { unique: false });
+      }
       if (!database.objectStoreNames.contains(DIGEST_FILE_STORE)) {
         const digestFiles = database.createObjectStore(DIGEST_FILE_STORE, { keyPath: "id" });
         digestFiles.createIndex("sessionId", "sessionId", { unique: false });
@@ -145,7 +164,31 @@ function openDatabase(): Promise<IDBDatabase> {
             if (!cursor) return;
             // SAFETY: the documents store contains ParsedDocument records written by this module.
             const document = cursor.value as ParsedDocument;
-            chatSessions.put(legacyDigestSession(document));
+            const session = legacyDigestSession(document);
+            chatSessions.put(session);
+            if (!hadChatStore) {
+              const thread = chatThreadFromDigestSession(session);
+              if (thread) upgradeTransaction.objectStore(CHAT_STORE).put(thread);
+            }
+            cursor.continue();
+          };
+        }
+      }
+      if (!hadChatStore && hadChatSessionStore) {
+        const upgradeTransaction = request.transaction;
+        if (upgradeTransaction) {
+          const chatSessions = upgradeTransaction.objectStore(CHAT_SESSION_STORE);
+          const chats = upgradeTransaction.objectStore(CHAT_STORE);
+          const cursorRequest = chatSessions.openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            // SAFETY: chatSessions is only written with the DigestSession shape by this module.
+            const session = cursor.value as DigestSession;
+            if (session.documentId) {
+              const thread = chatThreadFromDigestSession(session);
+              if (thread) chats.put(thread);
+            }
             cursor.continue();
           };
         }
@@ -297,6 +340,37 @@ export async function getDigestSessionAssets(sessionId: string): Promise<StoredD
   );
 }
 
+export async function getChatThread(threadId: string): Promise<ChatThread | undefined> {
+  const database = await openDatabase();
+  return requestValue<ChatThread | undefined>(
+    database.transaction(CHAT_STORE, "readonly").objectStore(CHAT_STORE).get(threadId),
+  );
+}
+
+export async function getChatThreadForDocument(documentId: string): Promise<ChatThread | undefined> {
+  const database = await openDatabase();
+  const threads = await requestValue<ChatThread[]>(
+    database.transaction(CHAT_STORE, "readonly").objectStore(CHAT_STORE).index("documentId").getAll(IDBKeyRange.only(documentId)),
+  );
+  return threads.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+}
+
+export async function getChatThreads(): Promise<ChatThread[]> {
+  const database = await openDatabase();
+  const threads = await requestValue<ChatThread[]>(database.transaction(CHAT_STORE, "readonly").objectStore(CHAT_STORE).getAll());
+  return threads.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+export async function putChatThread(thread: ChatThread): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, CHAT_STORE, "readwrite", (store) => store.put(thread));
+}
+
+export async function removeChatThread(threadId: string): Promise<void> {
+  const database = await openDatabase();
+  await completeTransaction(database, CHAT_STORE, "readwrite", (store) => store.delete(threadId));
+}
+
 /** Persist a transcript and its owned source/assets in one IndexedDB transaction. */
 export async function putDigestSession(
   session: DigestSession,
@@ -313,7 +387,7 @@ export async function putDigestSession(
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(
-      [CHAT_SESSION_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+      [CHAT_SESSION_STORE, CHAT_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
       "readwrite",
     );
     transaction.oncomplete = () => resolve();
@@ -321,6 +395,9 @@ export async function putDigestSession(
     transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
 
     transaction.objectStore(CHAT_SESSION_STORE).put(session);
+    const thread = chatThreadFromDigestSession(session);
+    if (thread) transaction.objectStore(CHAT_STORE).put(thread);
+    else transaction.objectStore(CHAT_STORE).delete(session.id);
     if (source) {
       transaction.objectStore(DOCUMENT_STORE).put(source.document);
       transaction.objectStore(DOCUMENT_FILE_STORE).put(source.file);
@@ -345,7 +422,7 @@ export async function removeDigestSession(sessionId: string): Promise<void> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(
-      [CHAT_SESSION_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+      [CHAT_SESSION_STORE, CHAT_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
       "readwrite",
     );
     transaction.oncomplete = () => resolve();
@@ -358,6 +435,7 @@ export async function removeDigestSession(sessionId: string): Promise<void> {
       // SAFETY: chatSessions is only written with the DigestSession shape by this module.
       const session = sessionRequest.result as DigestSession | undefined;
       sessionStore.delete(sessionId);
+      transaction.objectStore(CHAT_STORE).delete(sessionId);
       if (session?.documentId) {
         transaction.objectStore(DOCUMENT_STORE).delete(session.documentId);
         transaction.objectStore(DOCUMENT_FILE_STORE).delete(session.documentId);
@@ -426,9 +504,17 @@ export async function getDocumentFile(documentId: string): Promise<StoredDocumen
 export async function removeDocument(documentId: string): Promise<void> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction([DOCUMENT_STORE, DOCUMENT_FILE_STORE], "readwrite");
+    const transaction = database.transaction([DOCUMENT_STORE, DOCUMENT_FILE_STORE, CHAT_STORE], "readwrite");
     transaction.objectStore(DOCUMENT_STORE).delete(documentId);
     transaction.objectStore(DOCUMENT_FILE_STORE).delete(documentId);
+    const chats = transaction.objectStore(CHAT_STORE);
+    const request = chats.index("documentId").openCursor(IDBKeyRange.only(documentId));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
     transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { disposeEngine, getEngineStatus, runChatAgent, streamChatAgent } from "../src/pyodide/engineLoader";
+import { assistantText } from "../src/chat/agentStream";
+import { cancelAgentRequest, disposeEngine, getEngineStatus, runChatAgent, streamChatAgent } from "../src/pyodide/engineLoader";
 import type { DocumentNode } from "../src/parser";
 
 /**
@@ -111,6 +112,87 @@ describe("engineLoader request timers", () => {
     worker.emit({ type: "result", requestId: postedRequestId(worker), result: CHAT_RESULT });
     await expect(run).resolves.toMatchObject({ markdown: "# Held: affirmed" });
     expect(worker.terminated).toBe(false);
+  });
+
+  it("routes interleaved stream events to their distinct request callbacks", async () => {
+    const firstUpdates: string[] = [];
+    const secondUpdates: string[] = [];
+    const first = streamChatAgent(ROOT, "first", CREDENTIALS, (message) => firstUpdates.push(assistantText(message)));
+    const worker = lastWorker();
+    const firstId = postedRequestId(worker);
+    const second = streamChatAgent(ROOT, "second", CREDENTIALS, (message) => secondUpdates.push(assistantText(message)));
+    const secondId = postedRequestId(worker);
+    await bootEngine(worker);
+    worker.emit({ type: "started", requestId: firstId });
+    worker.emit({ type: "started", requestId: secondId });
+
+    worker.emit({ type: "stream", requestId: firstId, event: { type: "part-start", index: 0, kind: "text", content: "first" } });
+    worker.emit({ type: "stream", requestId: secondId, event: { type: "part-start", index: 0, kind: "text", content: "second" } });
+    worker.emit({ type: "result", requestId: firstId, result: CHAT_RESULT });
+    worker.emit({ type: "result", requestId: secondId, result: CHAT_RESULT });
+
+    await expect(first).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    await expect(second).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    expect(firstUpdates.at(-1)).toBe("first");
+    expect(secondUpdates.at(-1)).toBe("second");
+  });
+
+  it("cancels one request promptly without terminating the shared worker", async () => {
+    let requestId = 0;
+    const run = runChatAgent(ROOT, "cancel me", CREDENTIALS, { onRequestId: (id) => { requestId = id; } });
+    const worker = lastWorker();
+    await bootEngine(worker);
+    worker.emit({ type: "started", requestId: postedRequestId(worker) });
+    const failure = captureRejection(run);
+
+    cancelAgentRequest(requestId);
+
+    await expect(failure).resolves.toBeInstanceOf(Error);
+    await expect(run).rejects.toThrow("cancelled");
+    expect(worker.sent.at(-1)).toEqual({ command: "cancel", requestId });
+    expect(worker.terminated).toBe(false);
+    worker.emit({ type: "result", requestId, result: CHAT_RESULT });
+  });
+
+  it("keeps the remaining request timer after cancelling its sibling", async () => {
+    let firstId = 0;
+    const first = runChatAgent(ROOT, "cancel first", CREDENTIALS, { onRequestId: (id) => { firstId = id; } });
+    const second = runChatAgent(ROOT, "keep second", CREDENTIALS);
+    const worker = lastWorker();
+    const secondId = postedRequestId(worker);
+    await bootEngine(worker);
+    worker.emit({ type: "started", requestId: firstId });
+    worker.emit({ type: "started", requestId: secondId });
+    const firstFailure = captureRejection(first);
+
+    cancelAgentRequest(firstId);
+    await expect(firstFailure).resolves.toBeInstanceOf(Error);
+    worker.emit({ type: "result", requestId: secondId, result: CHAT_RESULT });
+
+    await expect(second).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    expect(worker.terminated).toBe(false);
+  });
+
+  it("keeps a third request pending until the worker grants a scheduler slot", async () => {
+    const first = runChatAgent(ROOT, "first", CREDENTIALS);
+    const second = runChatAgent(ROOT, "second", CREDENTIALS);
+    const third = runChatAgent(ROOT, "third", CREDENTIALS);
+    const worker = lastWorker();
+    const firstId = postedRequestId(worker, 2);
+    const secondId = postedRequestId(worker, 1);
+    const thirdId = postedRequestId(worker);
+    await bootEngine(worker);
+    worker.emit({ type: "started", requestId: firstId });
+    worker.emit({ type: "started", requestId: secondId });
+
+    worker.emit({ type: "result", requestId: firstId, result: CHAT_RESULT });
+    worker.emit({ type: "started", requestId: thirdId });
+    worker.emit({ type: "result", requestId: secondId, result: CHAT_RESULT });
+    worker.emit({ type: "result", requestId: thirdId, result: CHAT_RESULT });
+
+    await expect(first).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    await expect(second).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    await expect(third).resolves.toMatchObject({ markdown: "# Held: affirmed" });
   });
 
   it("expires only the silent request while a queued one stays pending", async () => {
