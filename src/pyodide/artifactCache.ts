@@ -1,8 +1,12 @@
-const PYODIDE_VERSION = "v314.0.5";
-const AGENT_VERSION = "pydantic-ai-2.33.0-httpcore2-2.12.0";
+export const PYODIDE_VERSION = "v314.0.5";
+export const AGENT_VERSION = "pydantic-ai-2.33.0-httpcore2-2.12.0";
+export const PYODIDE_RUNTIME_KEY = `${PYODIDE_VERSION}-${AGENT_VERSION}`;
+export const PYODIDE_RUNTIME_DB_NAME = `/digest-me-runtime-${PYODIDE_RUNTIME_KEY}`;
+export const PYODIDE_RUNTIME_MARKER_FILE = ".digest-me-runtime-version";
+export const PYODIDE_RUNTIME_MARKER_VALUE = PYODIDE_RUNTIME_KEY;
 
 export const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`;
-export const PYODIDE_CACHE_NAME = `digest-me-pyodide-${PYODIDE_VERSION}-${AGENT_VERSION}`;
+export const PYODIDE_CACHE_NAME = `digest-me-pyodide-${PYODIDE_RUNTIME_KEY}`;
 
 const PYODIDE_PATH_PREFIX = new URL(PYODIDE_INDEX_URL).pathname;
 const PYPI_ORIGIN = "https://pypi.org";
