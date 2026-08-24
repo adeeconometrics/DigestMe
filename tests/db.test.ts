@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   getDecks,
   getDecksWithStarter,
+  getChatThread,
+  getChatThreadForDocument,
+  getChatThreads,
   getDigestSession,
   getDigestSessionAssets,
   getDigestSessionSummaries,
@@ -12,10 +15,12 @@ import {
   getDocuments,
   getSessions,
   putDeck,
+  putChatThread,
   putDigestSession,
   putDocumentWithFile,
   putSession,
   removeDeck,
+  removeChatThread,
   removeDigestSession,
   removeDocument,
   removeSessionsForDeck,
@@ -23,6 +28,7 @@ import {
 import { STARTER_DECK } from "../src/data/starter";
 import {
   buildBlock,
+  buildChatThread,
   buildDeck,
   buildDocumentNode,
   buildDigestSession,
@@ -56,6 +62,12 @@ async function removeAllDocuments(): Promise<void> {
 async function removeAllDigestSessions(): Promise<void> {
   for (const session of await getDigestSessionSummaries()) {
     await removeDigestSession(session.id);
+  }
+}
+
+async function removeAllChatThreads(): Promise<void> {
+  for (const thread of await getChatThreads()) {
+    await removeChatThread(thread.threadId);
   }
 }
 
@@ -287,5 +299,42 @@ describe("digest chat sessions", () => {
     expect(await getDigestSessionAssets(session.id)).toEqual([]);
     expect(await getDocument(document.id)).toBeUndefined();
     expect(await getDocumentFile(document.id)).toBeUndefined();
+  });
+});
+
+describe("document chat threads", () => {
+  beforeEach(async () => {
+    await removeAllChatThreads();
+  });
+
+  it("persists and updates a thread by its thread id", async () => {
+    const thread = buildChatThread({ threadId: "thread-crud", documentId: "doc-crud" });
+    await putChatThread(thread);
+    await putChatThread({ ...thread, updatedAt: "2026-08-02T09:00:00.000Z" });
+
+    expect(await getChatThread(thread.threadId)).toMatchObject({
+      threadId: "thread-crud",
+      updatedAt: "2026-08-02T09:00:00.000Z",
+    });
+    expect(await getChatThreadForDocument("doc-crud")).toMatchObject({ threadId: "thread-crud" });
+  });
+
+  it("lists threads by recent activity and removes them", async () => {
+    await putChatThread(buildChatThread({ threadId: "thread-old", updatedAt: "2026-08-01T10:00:00.000Z" }));
+    await putChatThread(buildChatThread({ threadId: "thread-new", updatedAt: "2026-08-02T10:00:00.000Z" }));
+
+    expect((await getChatThreads()).map((thread) => thread.threadId)).toEqual(["thread-new", "thread-old"]);
+    await removeChatThread("thread-new");
+    expect(await getChatThread("thread-new")).toBeUndefined();
+  });
+
+  it("removes a document's threads with its source", async () => {
+    const document = buildParsedDocument({ id: "doc-thread-delete" });
+    await putDocumentWithFile(document, new File([new Uint8Array([1])], "case.pdf", { type: "application/pdf" }));
+    await putChatThread(buildChatThread({ threadId: "thread-delete", documentId: document.id }));
+
+    await removeDocument(document.id);
+
+    expect(await getChatThread("thread-delete")).toBeUndefined();
   });
 });

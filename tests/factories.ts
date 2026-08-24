@@ -5,7 +5,7 @@ import type {
   CaseDigestIssueInput,
 } from "../src/lib/caseDigestDocx";
 import type { DocumentNode, ParseMetrics, ParsedDocument } from "../src/parser";
-import type { DigestSession, PersistedChatMessage } from "../src/chat/session";
+import type { ChatThread, DigestSession, PersistedChatMessage } from "../src/chat/session";
 import type { Deck, Flashcard, StudySession } from "../src/types";
 
 /**
@@ -147,6 +147,19 @@ export function buildDigestSession(overrides: Partial<DigestSession> = {}): Dige
     createdAt: "2026-08-01T09:00:00.000Z",
     updatedAt: "2026-08-01T09:02:00.000Z",
     messages,
+    ...overrides,
+  };
+}
+
+export function buildChatThread(overrides: Partial<ChatThread> = {}): ChatThread {
+  return {
+    threadId: "thread-1",
+    documentId: "doc-1",
+    createdAt: "2026-08-01T09:00:00.000Z",
+    updatedAt: "2026-08-01T09:02:00.000Z",
+    messages: [
+      { id: "thread-welcome", at: "2026-08-01T09:00:00.000Z", role: "assistant", kind: "welcome" },
+    ],
     ...overrides,
   };
 }
