@@ -12,7 +12,7 @@ export function requestPersistentStorageOnGesture(
   storage: StoragePersistenceAdapter | undefined = typeof navigator === "undefined" ? undefined : navigator.storage,
   target: GestureTarget | undefined = typeof window === "undefined" ? undefined : window,
 ): () => void {
-  if (!storage || !target) return () => undefined;
+  if (!storage || typeof storage.persisted !== "function" || typeof storage.persist !== "function" || !target) return () => undefined;
 
   let requested = false;
   let alreadyPersistent = false;
