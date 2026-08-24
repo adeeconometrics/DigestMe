@@ -290,6 +290,13 @@ export async function getDigestSession(sessionId: string): Promise<DigestSession
   };
 }
 
+export async function getDigestSessionAssets(sessionId: string): Promise<StoredDigestFile[]> {
+  const database = await openDatabase();
+  return requestValue<StoredDigestFile[]>(
+    database.transaction(DIGEST_FILE_STORE, "readonly").objectStore(DIGEST_FILE_STORE).index("sessionId").getAll(IDBKeyRange.only(sessionId)),
+  );
+}
+
 /** Persist a transcript and its owned source/assets in one IndexedDB transaction. */
 export async function putDigestSession(
   session: DigestSession,

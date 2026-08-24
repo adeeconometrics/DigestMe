@@ -3,6 +3,7 @@ import {
   getDecks,
   getDecksWithStarter,
   getDigestSession,
+  getDigestSessionAssets,
   getDigestSessionSummaries,
   getDocument,
   getDocumentFile,
@@ -283,6 +284,7 @@ describe("digest chat sessions", () => {
     await removeDigestSession(session.id);
 
     expect(await getDigestSession(session.id)).toBeUndefined();
+    expect(await getDigestSessionAssets(session.id)).toEqual([]);
     expect(await getDocument(document.id)).toBeUndefined();
     expect(await getDocumentFile(document.id)).toBeUndefined();
   });

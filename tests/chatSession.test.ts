@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createInitialAssistantMessage } from "../src/chat/agentStream";
+import { buildCaseDigest } from "./factories";
 import {
   DEFAULT_VISIBLE_DIGEST_SESSIONS,
   hasOlderDigestSessions,
@@ -63,5 +64,45 @@ describe("chat message persistence", () => {
       refs: [],
       execution: { model: "test-model", elapsedMs: 24 },
     });
+  });
+
+  it("retains the digest response and asset reference without storing blob URLs", () => {
+    const message: ChatMessage = {
+      id: "digest-1",
+      at: "2026-08-01T00:00:00.000Z",
+      role: "assistant",
+      kind: "digest",
+      markdown: "A durable digest.",
+      digest: buildCaseDigest(),
+      refs: [],
+      execution: { model: "test-model", elapsedMs: 24 },
+      docxFileId: "docx-1",
+      docxFileName: "digest.docx",
+      docxBlob: new Blob([new Uint8Array([1])]),
+      docxUrl: "blob:test",
+    };
+
+    expect(serializeChatMessage(message)).toEqual(expect.objectContaining({
+      kind: "digest",
+      markdown: "A durable digest.",
+      docxFileId: "docx-1",
+      docxFileName: "digest.docx",
+    }));
+    expect(serializeChatMessage(message)).not.toHaveProperty("docxBlob");
+    expect(serializeChatMessage(message)).not.toHaveProperty("docxUrl");
+  });
+
+  it("does not persist an incomplete streaming response", () => {
+    const message: ChatMessage = {
+      id: "stream-1",
+      at: "2026-08-01T00:00:00.000Z",
+      role: "assistant",
+      kind: "agent-stream",
+      markdown: "Still reading...",
+      assistant: createInitialAssistantMessage(),
+      execution: { model: "test-model", elapsedMs: 24 },
+    };
+
+    expect(serializeChatMessage(message)).toBeNull();
   });
 });
