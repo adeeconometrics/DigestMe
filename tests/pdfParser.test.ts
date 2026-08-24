@@ -1,28 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PdfProcessResult } from "@firecrawl/pdf-inspector-wasm";
+import { createPdfParser, type PdfInspectorRuntime } from "../src/parser/pdfParser";
+import { PdfParseError } from "../src/parser/types";
 
-const mocks = vi.hoisted(() => ({
-  init: vi.fn().mockResolvedValue(undefined),
-  processPdf: vi.fn(),
-  version: vi.fn(() => "1.0.0-test"),
-}));
-
-vi.mock("@firecrawl/pdf-inspector-wasm", () => ({
-  default: mocks.init,
-  processPdf: mocks.processPdf,
-  version: mocks.version,
-}));
-
-// ensureParserReady caches its init promise at module scope, so each test gets
-// a fresh module instance to observe startup behavior deterministically.
-beforeEach(() => {
-  vi.resetModules();
-  mocks.processPdf.mockReset();
-  mocks.init.mockClear();
-});
-
-async function loadParser() {
-  return import("../src/parser/pdfParser");
+/** Builds a faithful in-memory pdf-inspector runtime; each test owns a fresh parser bound to it. */
+function testRuntime(overrides: Partial<PdfInspectorRuntime> = {}) {
+  const init = vi.fn().mockResolvedValue(undefined);
+  const processPdf = vi.fn();
+  const version = vi.fn(() => "1.0.0-test");
+  const runtime: PdfInspectorRuntime = { init, processPdf, version, ...overrides };
+  return { runtime, init, processPdf, version };
 }
 
 function pdfFile(): File {
@@ -44,9 +31,9 @@ function processResult(overrides: Partial<PdfProcessResult> = {}) {
 
 describe("ensureParserReady", () => {
   it("wraps parser startup failures in a PdfParseError and recovers on retry", async () => {
-    mocks.init.mockRejectedValueOnce(new Error("wasm boom"));
-    const { ensureParserReady } = await loadParser();
-    const { PdfParseError } = await import("../src/parser/types");
+    const { runtime, init } = testRuntime();
+    init.mockRejectedValueOnce(new Error("wasm boom"));
+    const { ensureParserReady } = createPdfParser(runtime);
 
     const firstAttempt = ensureParserReady();
     await expect(firstAttempt).rejects.toBeInstanceOf(PdfParseError);
@@ -55,17 +42,19 @@ describe("ensureParserReady", () => {
   });
 
   it("loads the parser runtime once and reports its version", async () => {
-    const { ensureParserReady } = await loadParser();
+    const { runtime, init } = testRuntime();
+    const { ensureParserReady } = createPdfParser(runtime);
 
     await expect(ensureParserReady()).resolves.toBe("1.0.0-test");
-    expect(mocks.init).toHaveBeenCalledOnce();
+    expect(init).toHaveBeenCalledOnce();
   });
 });
 
 describe("parsePdf", () => {
   it("turns extracted markdown into a typed document", async () => {
-    mocks.processPdf.mockReturnValue(processResult());
-    const { parsePdf } = await loadParser();
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockReturnValue(processResult());
+    const { parsePdf } = createPdfParser(runtime);
 
     const document = await parsePdf(pdfFile());
 
@@ -82,7 +71,7 @@ describe("parsePdf", () => {
         hasEncodingIssues: false,
       },
     });
-    expect(mocks.processPdf).toHaveBeenCalledWith(expect.any(Uint8Array), {
+    expect(processPdf).toHaveBeenCalledWith(expect.any(Uint8Array), {
       includePageMarkers: true,
       profile: "fidelity",
     });
@@ -90,18 +79,20 @@ describe("parsePdf", () => {
   });
 
   it("falls back to the file name when extraction has no title", async () => {
-    mocks.processPdf.mockReturnValue(processResult({ title: undefined }));
-    const { parsePdf } = await loadParser();
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockReturnValue(processResult({ title: undefined }));
+    const { parsePdf } = createPdfParser(runtime);
 
     const document = await parsePdf(pdfFile());
     expect(document.root.label).toBe("case.pdf");
   });
 
   it("rejects scanned image-only PDFs with an OCR hint", async () => {
-    mocks.processPdf.mockReturnValue(
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockReturnValue(
       processResult({ markdown: "", pdfType: "ImageBased", pageCount: 0 }),
     );
-    const { parsePdf } = await loadParser();
+    const { parsePdf } = createPdfParser(runtime);
 
     await expect(parsePdf(pdfFile())).rejects.toThrow(
       "This looks like a scanned image-only PDF. OCR is required before it can be digested.",
@@ -109,32 +100,33 @@ describe("parsePdf", () => {
   });
 
   it("rejects PDFs with no extractable text", async () => {
-    mocks.processPdf.mockReturnValue(
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockReturnValue(
       processResult({ markdown: "", pdfType: "TextBased", pageCount: 5 }),
     );
-    const { parsePdf } = await loadParser();
+    const { parsePdf } = createPdfParser(runtime);
 
     await expect(parsePdf(pdfFile())).rejects.toThrow("No text could be extracted from this PDF.");
   });
 
   it("wraps extraction failures in a PdfParseError", async () => {
-    mocks.processPdf.mockImplementation(() => {
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockImplementation(() => {
       throw new Error("extraction exploded");
     });
-    const { parsePdf } = await loadParser();
+    const { parsePdf } = createPdfParser(runtime);
 
     await expect(parsePdf(pdfFile())).rejects.toThrow("extraction exploded");
-    await expect(parsePdf(pdfFile())).rejects.toBeInstanceOf(
-      (await import("../src/parser/types")).PdfParseError,
-    );
+    await expect(parsePdf(pdfFile())).rejects.toBeInstanceOf(PdfParseError);
   });
 
   it("honors the compact profile option", async () => {
-    mocks.processPdf.mockReturnValue(processResult());
-    const { parsePdf } = await loadParser();
+    const { runtime, processPdf } = testRuntime();
+    processPdf.mockReturnValue(processResult());
+    const { parsePdf } = createPdfParser(runtime);
 
     await parsePdf(pdfFile(), { profile: "compact" });
-    expect(mocks.processPdf).toHaveBeenCalledWith(expect.any(Uint8Array), {
+    expect(processPdf).toHaveBeenCalledWith(expect.any(Uint8Array), {
       includePageMarkers: true,
       profile: "compact",
     });
@@ -142,16 +134,18 @@ describe("parsePdf", () => {
 });
 
 describe("isPdfFile", () => {
-  it("accepts files by name or mime type", async () => {
-    const { isPdfFile } = await loadParser();
+  it("accepts files by name or mime type", () => {
+    const { runtime } = testRuntime();
+    const { isPdfFile } = createPdfParser(runtime);
 
     expect(isPdfFile(new File([], "brief.pdf"))).toBe(true);
     expect(isPdfFile(new File([], "BRIEF.PDF"))).toBe(true);
     expect(isPdfFile(new File([], "memo", { type: "application/pdf" }))).toBe(true);
   });
 
-  it("rejects non-pdf files", async () => {
-    const { isPdfFile } = await loadParser();
+  it("rejects non-pdf files", () => {
+    const { runtime } = testRuntime();
+    const { isPdfFile } = createPdfParser(runtime);
 
     expect(isPdfFile(new File([], "brief.txt"))).toBe(false);
     expect(isPdfFile(new File([], "brief.pdf.txt"))).toBe(false);
