@@ -20,11 +20,11 @@ interface ModelsResponse {
   data?: unknown;
 }
 
-function isRecord(value: unknown): value is Record<string, WireValue> {
+function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null;
 }
 
-function parseModel(value: unknown): OpenRouterModelOption | null {
+function parseModel(value: WireValue): OpenRouterModelOption | null {
   if (!isRecord(value)) return null;
 
   const model = value as ModelRecord;
@@ -56,7 +56,7 @@ export async function fetchOpenRouterModels(signal?: AbortSignal, cache: Request
   });
   if (!response.ok) throw new Error(`OpenRouter returned ${response.status} while loading models.`);
 
-  let payload: unknown;
+  let payload: WireValue;
   try {
     payload = await response.json();
   } catch {

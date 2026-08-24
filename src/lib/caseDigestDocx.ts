@@ -132,7 +132,7 @@ const JUSTIFIED_CELL_TEXT: IParagraphOptions = {
   spacing: BODY_SPACING,
 };
 
-function isRecord(value: unknown): value is Record<string, WireValue> {
+function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -152,7 +152,7 @@ function requiredStringArray(record: Record<string, WireValue>, key: string, pat
   return value;
 }
 
-function parseFacts(value: unknown): CaseDigestFacts {
+function parseFacts(value: WireValue): CaseDigestFacts {
   if (!isRecord(value)) {
     throw new TypeError("Expected facts to be an object.");
   }
@@ -171,14 +171,14 @@ function parseFacts(value: unknown): CaseDigestFacts {
   return facts;
 }
 
-function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
+function parseIssue(value: WireValue, index: number): CaseDigestIssueInput {
   const path = `issues[${index}]`;
 
   if (Array.isArray(value)) {
     if (value.length !== 2 || value.some((item) => typeof item !== "string")) {
       throw new TypeError(`Expected ${path} to be a [ruling, ratio] string pair.`);
     }
-    return [value[0], value[1]];
+    return [String(value[0]), String(value[1])];
   }
 
   if (!isRecord(value)) {
@@ -195,7 +195,7 @@ function parseIssue(value: unknown, index: number): CaseDigestIssueInput {
   return issue;
 }
 
-function parseIssues(value: unknown): CaseDigestIssueInput[] {
+function parseIssues(value: WireValue): CaseDigestIssueInput[] {
   if (!Array.isArray(value)) {
     throw new TypeError("Expected issues to be an array.");
   }
@@ -203,8 +203,8 @@ function parseIssues(value: unknown): CaseDigestIssueInput[] {
 }
 
 /** Validate and type a parsed object or a JSON string before rendering it. */
-export function parseCaseDigestJson(input: unknown): CaseDigest {
-  const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
+export function parseCaseDigestJson(input: WireValue): CaseDigest {
+  const value: WireValue = typeof input === "string" ? JSON.parse(input) : input;
   if (!isRecord(value)) {
     throw new TypeError("Expected case-digest JSON to be an object.");
   }
@@ -620,7 +620,7 @@ export function renderCaseDigestDocx(
 
 /** Parse raw JSON and pack it into a browser Blob in one step. */
 export function caseDigestJsonToDocx(
-  input: unknown,
+  input: WireValue,
   options: CaseDigestDocxOptions = {},
 ): Promise<Blob> {
   return renderCaseDigestDocx(parseCaseDigestJson(input), options);

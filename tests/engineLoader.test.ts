@@ -10,16 +10,16 @@ import type { DocumentNode } from "../src/parser";
 class FakeWorker {
   static instances: FakeWorker[] = [];
 
-  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onmessage: ((event: { data: any }) => void) | null = null;
   onerror: ((event: { message?: string }) => void) | null = null;
   terminated = false;
-  readonly sent: unknown[] = [];
+  readonly sent: any[] = [];
 
   constructor() {
     FakeWorker.instances.push(this);
   }
 
-  postMessage(data: unknown): void {
+  postMessage(data: any): void {
     this.sent.push(data);
   }
 
@@ -27,7 +27,7 @@ class FakeWorker {
     this.terminated = true;
   }
 
-  emit(message: unknown): void {
+  emit(message: any): void {
     this.onmessage?.({ data: message });
   }
 }
@@ -77,7 +77,7 @@ function captureRejection<T>(promise: Promise<T>): Promise<Error> {
     () => {
       throw new Error("Expected the request to be rejected.");
     },
-    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))),
   );
 }
 

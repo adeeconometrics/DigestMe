@@ -54,14 +54,14 @@ export type ChatStreamEvent =
       content?: string;
       toolCallId?: string;
       toolName?: string;
-      args?: unknown;
+      args?: WireValue;
     }
   | {
       type: "part-delta";
       index: number;
       kind: ChatPartKind;
       contentDelta?: string;
-      argsDelta?: unknown;
+      argsDelta?: WireValue;
       toolNameDelta?: string;
       toolCallId?: string;
     }
@@ -69,9 +69,9 @@ export type ChatStreamEvent =
       type: "part-end";
       index: number;
       kind: ChatPartKind;
-      args?: unknown;
+      args?: WireValue;
     }
-  | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
+  | { type: "tool-call"; toolCallId: string; toolName: string; args: WireValue }
   | { type: "tool-result"; toolCallId: string; content: string; isError: boolean };
 
 export interface EngineStatus {
@@ -79,16 +79,16 @@ export interface EngineStatus {
   message?: string;
 }
 
-export function isDocumentNodeKind(value: unknown): value is DocumentNodeKind {
+export function isDocumentNodeKind(value: WireValue): value is DocumentNodeKind {
   return value === "document" || value === "section" || value === "block";
 }
 
-function requiredString(value: unknown, name: string): string {
+function requiredString(value: WireValue, name: string): string {
   if (typeof value !== "string") throw new Error(`Agent returned an invalid ${name}.`);
   return value;
 }
 
-function parseReference(value: unknown): AgentReference {
+function parseReference(value: WireValue): AgentReference {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid document reference.");
   }
@@ -112,7 +112,7 @@ function parseReference(value: unknown): AgentReference {
   };
 }
 
-function parseExecution(value: unknown): AgentExecution {
+function parseExecution(value: WireValue): AgentExecution {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid execution result.");
   }
@@ -133,7 +133,7 @@ function parseExecution(value: unknown): AgentExecution {
   return execution;
 }
 
-function optionalTimestamp(value: unknown, name: string): number | undefined {
+function optionalTimestamp(value: WireValue, name: string): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`Agent returned an invalid execution ${name}.`);
@@ -141,12 +141,12 @@ function optionalTimestamp(value: unknown, name: string): number | undefined {
   return value;
 }
 
-function parseReferences(value: unknown): AgentReference[] {
+function parseReferences(value: WireValue): AgentReference[] {
   if (!Array.isArray(value)) throw new Error("Agent returned invalid document references.");
   return value.map(parseReference);
 }
 
-export function parseChatAgentResult(value: unknown): ChatAgentResult {
+export function parseChatAgentResult(value: WireValue): ChatAgentResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid chat result.");
   }
@@ -159,7 +159,7 @@ export function parseChatAgentResult(value: unknown): ChatAgentResult {
   };
 }
 
-export function parseCaseDigestAgentResult(value: unknown): CaseDigestAgentResult {
+export function parseCaseDigestAgentResult(value: WireValue): CaseDigestAgentResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid digest result.");
   }
@@ -172,31 +172,31 @@ export function parseCaseDigestAgentResult(value: unknown): CaseDigestAgentResul
   };
 }
 
-function streamRecord(value: unknown): Record<string, WireValue> {
+function streamRecord(value: WireValue): Record<string, WireValue> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid chat stream event.");
   }
   return value as Record<string, WireValue>;
 }
 
-function streamIndex(value: unknown): number {
+function streamIndex(value: WireValue): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error("Agent returned an invalid chat stream part index.");
   }
   return value;
 }
 
-function streamKind(value: unknown): ChatPartKind {
+function streamKind(value: WireValue): ChatPartKind {
   if (value === "text" || value === "thinking" || value === "tool-call") return value;
   throw new Error("Agent returned an invalid chat stream part kind.");
 }
 
-function optionalStreamString(value: unknown, name: string): string | undefined {
+function optionalStreamString(value: WireValue, name: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   return requiredString(value, name);
 }
 
-export function parseChatStreamEvent(value: unknown): ChatStreamEvent {
+export function parseChatStreamEvent(value: WireValue): ChatStreamEvent {
   const event = streamRecord(value);
   const type = requiredString(event.type, "chat stream event type");
 

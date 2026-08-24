@@ -58,10 +58,10 @@ export default function SettingsPage({ onBackToStudy }: SettingsPageProps) {
         setModels(loadedModels);
         setCatalogStatus("ready");
       })
-      .catch((fetchError: unknown) => {
-        if (controller.signal.aborted || (fetchError instanceof Error && fetchError.name === "AbortError")) return;
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted || (cause instanceof Error && cause.name === "AbortError")) return;
         setCatalogStatus("error");
-        setCatalogError(fetchError instanceof Error ? fetchError.message : "The OpenRouter model catalog could not be loaded.");
+        setCatalogError(cause instanceof Error ? cause.message : "The OpenRouter model catalog could not be loaded.");
       });
     return () => controller.abort();
   }, [catalogAttempt]);

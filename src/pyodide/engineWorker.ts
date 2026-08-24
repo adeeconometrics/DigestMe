@@ -53,8 +53,8 @@ function postStatus(state: WorkerResponse["state"], message?: string): void {
   workerScope.postMessage(status);
 }
 
-function summarizeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "The case-digest agent failed.";
+function summarizeError(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : "The case-digest agent failed.";
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const summary = [...lines].reverse().find((line) => /^[\w.]+(?:Error|Exception):\s/.test(line)) ?? lines[lines.length - 1];
   if (!summary) return "The case-digest agent failed.";
@@ -93,11 +93,11 @@ from engine.bridge import run_request, run_request_stream
 }
 
 function getEngine(): Promise<PyodideAPI> {
-  pyodidePromise ??= loadEngine().catch((error: unknown) => {
-    const message = summarizeError(error);
+  pyodidePromise ??= loadEngine().catch((cause: unknown) => {
+    const message = summarizeError(cause);
     postStatus("failed", message);
     pyodidePromise = undefined;
-    throw error;
+    throw cause;
   });
   return pyodidePromise;
 }
@@ -135,7 +135,7 @@ async function execute(request: WorkerRequest): Promise<WireValue> {
   });
   pyodide.globals.set("request_payload", payload);
   const streamCallback = request.stream
-    ? (event: unknown) => {
+    ? (event: WireValue) => {
         const eventJson = typeof event === "string" ? event : String(event);
         workerScope.postMessage({
           type: "stream",
