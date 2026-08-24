@@ -4,6 +4,7 @@ import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
 import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
+import { isPdfFile } from "./parser";
 import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
 import { requestPersistentStorageOnGesture } from "./lib/storagePersistence";
 
@@ -40,6 +41,7 @@ interface SessionStats {
 interface DigestTab {
   id: string;
   documentId: string | null;
+  pendingFile?: File | null;
 }
 
 type DigestTabStatus = "idle" | "running" | "failed";
@@ -51,8 +53,8 @@ function makeId(prefix: string): string {
   return `${prefix}-${randomId ?? Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-function newDigestTab(): DigestTab {
-  return { id: makeId("digest-tab"), documentId: null };
+function newDigestTab(pendingFile: File | null = null): DigestTab {
+  return { id: makeId("digest-tab"), documentId: null, pendingFile };
 }
 
 function buildStudyOrder(cards: Flashcard[], randomize: boolean): string[] {
@@ -143,7 +145,24 @@ export default function App() {
     setOpenPanel(null);
   }
 
-  function beginDigestSession(): void {
+  function beginDigestSession(files?: File[]): void {
+    if (files && files.length) {
+      const pdfs = files.filter(isPdfFile);
+      if (!pdfs.length) {
+        setToast("Only PDF documents can be opened in the digest bench.");
+        setView("digest");
+        setOpenPanel(null);
+        return;
+      }
+      const tabs = pdfs.map((file) => newDigestTab(file));
+      setDigestTabs((previous) => [...previous, ...tabs]);
+      setActiveDigestTabId(tabs[0].id);
+      setView("digest");
+      setOpenPanel(null);
+      const skipped = files.length - pdfs.length;
+      if (skipped > 0) setToast(`${skipped} non-PDF file${skipped === 1 ? " was" : "s were"} skipped.`);
+      return;
+    }
     const tab = newDigestTab();
     setDigestTabs((previous) => [...previous, tab]);
     setActiveDigestTabId(tab.id);
@@ -697,6 +716,7 @@ function DigestWorkspace({
               onDocumentReady={(summary) => onDocumentReady(tab.id, summary)}
               onStatusChange={(status) => onStatusChange(tab.id, status)}
               onStorageError={onStorageError}
+              pendingFile={tab.pendingFile ?? null}
             />
           </div>
         ))}
@@ -719,7 +739,7 @@ interface SidebarProps {
   onTogglePanel: (panel: "sessions" | "decks") => void;
   onOpenDocument: (documentId: string) => void;
   onOpenSettings: () => void;
-  onNewSession: () => void;
+  onNewSession: (files?: File[]) => void;
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
@@ -744,6 +764,27 @@ function Sidebar({
   runningDocumentIds,
   view,
 }: SidebarProps) {
+  const [isMultiFileDrop, setIsMultiFileDrop] = useState(false);
+
+  function handleNewSessionDragOver(event: DragEvent<HTMLElement>): void {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    setIsMultiFileDrop(event.dataTransfer.items.length > 1);
+  }
+
+  function handleNewSessionDragLeave(event: DragEvent<HTMLElement>): void {
+    const related = event.relatedTarget;
+    if (related instanceof Node && event.currentTarget.contains(related)) return;
+    setIsMultiFileDrop(false);
+  }
+
+  function handleNewSessionDrop(event: DragEvent<HTMLElement>): void {
+    event.preventDefault();
+    setIsMultiFileDrop(false);
+    const files = Array.from(event.dataTransfer.files);
+    onNewSession(files);
+  }
+
   return (
     <aside className={`sidebar ${collapsed ? "is-rail" : ""}`}>
       <button
@@ -807,9 +848,16 @@ function Sidebar({
             ) : (
               <p className="sub-empty">No documents yet.</p>
             )}
-            <button className="sub-item sub-new" onClick={onNewSession} type="button">
-              <Icon name="plus" size={13} />
-              <span>Open document</span>
+            <button
+              className={`sub-item sub-new ${isMultiFileDrop ? "is-digest-ready" : ""}`}
+              onClick={() => onNewSession()}
+              onDragLeave={handleNewSessionDragLeave}
+              onDragOver={handleNewSessionDragOver}
+              onDrop={handleNewSessionDrop}
+              type="button"
+            >
+              <Icon name={isMultiFileDrop ? "spark" : "plus"} size={13} />
+              <span>{isMultiFileDrop ? "DigestMe" : "Open document"}</span>
             </button>
           </div>
         )}

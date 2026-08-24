@@ -55,6 +55,7 @@ interface DigestPreview {
 
 interface DigestPageProps {
   documentId: string | null;
+  pendingFile?: File | null;
   onDocumentReady?: (summary: DocumentSummary) => void;
   onStatusChange?: (status: AgentStatus) => void;
   onStorageError?: (message: string) => void;
@@ -73,6 +74,7 @@ interface ThreadSnapshot {
 /** Case digest: a chat session over a locally parsed PDF. */
 export default function DigestPage({
   documentId,
+  pendingFile,
   onDocumentReady,
   onStatusChange,
   onStorageError,
@@ -108,6 +110,7 @@ export default function DigestPage({
   const sessionDocumentIdRef = useRef(sessionDocumentId);
   const isSessionReadyRef = useRef(isSessionReady);
   const onStatusChangeRef = useRef(onStatusChange);
+  const pendingFileConsumedRef = useRef(false);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -137,6 +140,13 @@ export default function DigestPage({
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
   }, [onStatusChange]);
+
+  // Parse a file handed to this tab from a sidebar drop before any interaction.
+  useEffect(() => {
+    if (!pendingFile || pendingFileConsumedRef.current) return;
+    pendingFileConsumedRef.current = true;
+    void processPdf(pendingFile);
+  }, [pendingFile]);
 
   // Keep the newest message in view as the thread grows.
   useEffect(() => {

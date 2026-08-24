@@ -315,6 +315,13 @@ input:focus-visible,
   color: var(--ink);
 }
 
+.sub-new.is-digest-ready {
+  border-color: var(--lime-dark);
+  background: rgba(218, 250, 113, 0.38);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(184, 216, 86, 0.2);
+}
+
 .sub-empty {
   margin: 0;
   padding: 6px 9px;
