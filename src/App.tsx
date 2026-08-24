@@ -11,6 +11,7 @@ import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
 import { getDecksWithStarter, getDigestSessionSummaries, getSessions, putDeck, putSession, removeDeck, removeDigestSession, removeSessionsForDeck } from "./lib/db";
 import type { AppView, CsvValidationResult, Deck, Flashcard, Rating, StudySession } from "./types";
+import { requestPersistentStorageOnGesture } from "./lib/storagePersistence";
 
 const DigestPage = lazy(() => import("./pages/DigestPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -197,6 +198,8 @@ export default function App() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => requestPersistentStorageOnGesture(), []);
 
   useEffect(() => {
     if (isLoading) return;
