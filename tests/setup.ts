@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 
 // src/lib/db.ts guards on window.indexedDB; node has no window, so point it at
 // the fake so the real IndexedDB wrapper can be exercised unmodified.
-if (typeof globalThis.window === "undefined") {
+if (!("window" in globalThis)) {
   (globalThis as { window?: unknown }).window = globalThis;
 }
 
@@ -10,14 +10,14 @@ if (typeof globalThis.window === "undefined") {
 // global only exists on node 23+. A bare constructor supplies the
 // `.prototype` pdfjs extends, so pdf.js loads on node 20/22 (CI runs node 20).
 const globalWithIterator = globalThis as { Iterator?: unknown };
-if (typeof globalWithIterator.Iterator === "undefined") {
+if (globalWithIterator.Iterator === undefined) {
   globalWithIterator.Iterator = function IteratorPolyfill() {};
 }
 
 // pdfjs-dist constructs `new DOMMatrix()` at module scope; node has no
 // DOMMatrix global. The stub carries the 2D affine fields pdfjs reads, which
 // is enough for the pure indexing math under test.
-if (typeof globalThis.DOMMatrix === "undefined") {
+if (globalThis.DOMMatrix === undefined) {
   class DOMMatrixStub {
     a = 1;
     b = 0;

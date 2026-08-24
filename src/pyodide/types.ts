@@ -1,7 +1,7 @@
 import { parseCaseDigestJson } from "../lib/caseDigestDocx";
 import type { CaseDigest } from "../lib/caseDigestDocx";
 import type { DocumentNode, DocumentNodeKind } from "../parser";
-import type { WireValue } from "../types";
+import { isWireBoolean, isWireNonNegativeInteger, isWireRecord, isWireString, type WireValue } from "../types";
 
 export interface AgentCredentials {
   modelId: string;
@@ -84,48 +84,46 @@ export function isDocumentNodeKind(value: WireValue): value is DocumentNodeKind 
 }
 
 function requiredString(value: WireValue, name: string): string {
-  if (typeof value !== "string") throw new Error(`Agent returned an invalid ${name}.`);
+  if (!isWireString(value)) throw new Error(`Agent returned an invalid ${name}.`);
   return value;
 }
 
 function parseReference(value: WireValue): AgentReference {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isWireRecord(value)) {
     throw new Error("Agent returned an invalid document reference.");
   }
 
-  const reference = value as Record<string, WireValue>;
-  const page = reference.page;
-  if (page !== null && (typeof page !== "number" || !Number.isInteger(page))) {
+  const page = value.page;
+  if (page !== null && !isWireNonNegativeInteger(page)) {
     throw new Error("Agent returned an invalid reference page.");
   }
 
-  const kind = reference.kind;
+  const kind = value.kind;
   if (!isDocumentNodeKind(kind)) throw new Error("Agent returned an invalid reference kind.");
 
   return {
-    nodeId: requiredString(reference.node_id, "reference node id"),
+    nodeId: requiredString(value.node_id, "reference node id"),
     kind,
-    label: requiredString(reference.label, "reference label"),
-    section: requiredString(reference.section, "reference section"),
+    label: requiredString(value.label, "reference label"),
+    section: requiredString(value.section, "reference section"),
     page,
-    snippet: requiredString(reference.snippet, "reference snippet"),
+    snippet: requiredString(value.snippet, "reference snippet"),
   };
 }
 
 function parseExecution(value: WireValue): AgentExecution {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isWireRecord(value)) {
     throw new Error("Agent returned an invalid execution result.");
   }
 
-  const result = value as Record<string, WireValue>;
-  const elapsedMs = result.elapsed_ms;
-  if (typeof elapsedMs !== "number" || !Number.isInteger(elapsedMs) || elapsedMs < 0) {
+  const elapsedMs = value.elapsed_ms;
+  if (!isWireNonNegativeInteger(elapsedMs)) {
     throw new Error("Agent returned an invalid execution time.");
   }
-  const startedAt = optionalTimestamp(result.started_at, "start time");
-  const endedAt = optionalTimestamp(result.ended_at, "end time");
+  const startedAt = optionalTimestamp(value.started_at, "start time");
+  const endedAt = optionalTimestamp(value.ended_at, "end time");
   const execution: AgentExecution = {
-    model: requiredString(result.model, "model"),
+    model: requiredString(value.model, "model"),
     elapsedMs,
   };
   if (startedAt !== undefined) execution.startedAt = startedAt;
@@ -135,7 +133,7 @@ function parseExecution(value: WireValue): AgentExecution {
 
 function optionalTimestamp(value: WireValue, name: string): number | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (!isWireNonNegativeInteger(value)) {
     throw new Error(`Agent returned an invalid execution ${name}.`);
   }
   return value;
@@ -147,40 +145,38 @@ function parseReferences(value: WireValue): AgentReference[] {
 }
 
 export function parseChatAgentResult(value: WireValue): ChatAgentResult {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isWireRecord(value)) {
     throw new Error("Agent returned an invalid chat result.");
   }
 
-  const result = value as Record<string, WireValue>;
   return {
-    ...parseExecution(result),
-    markdown: requiredString(result.markdown, "markdown answer"),
-    references: parseReferences(result.references),
+    ...parseExecution(value),
+    markdown: requiredString(value.markdown, "markdown answer"),
+    references: parseReferences(value.references),
   };
 }
 
 export function parseCaseDigestAgentResult(value: WireValue): CaseDigestAgentResult {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isWireRecord(value)) {
     throw new Error("Agent returned an invalid digest result.");
   }
 
-  const result = value as Record<string, WireValue>;
   return {
-    ...parseExecution(result),
-    digest: parseCaseDigestJson(result.digest),
-    references: parseReferences(result.references),
+    ...parseExecution(value),
+    digest: parseCaseDigestJson(value.digest),
+    references: parseReferences(value.references),
   };
 }
 
 function streamRecord(value: WireValue): Record<string, WireValue> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isWireRecord(value)) {
     throw new Error("Agent returned an invalid chat stream event.");
   }
-  return value as Record<string, WireValue>;
+  return value;
 }
 
 function streamIndex(value: WireValue): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (!isWireNonNegativeInteger(value)) {
     throw new Error("Agent returned an invalid chat stream part index.");
   }
   return value;
@@ -202,7 +198,7 @@ export function parseChatStreamEvent(value: WireValue): ChatStreamEvent {
 
   if (type === "start") {
     const startedAt = event.started_at;
-    if (typeof startedAt !== "number" || !Number.isInteger(startedAt) || startedAt < 0) {
+    if (!isWireNonNegativeInteger(startedAt)) {
       throw new Error("Agent returned an invalid chat stream start time.");
     }
     return { type, model: requiredString(event.model, "chat stream model"), startedAt };
@@ -261,7 +257,7 @@ export function parseChatStreamEvent(value: WireValue): ChatStreamEvent {
   }
 
   if (type === "tool-result") {
-    if (typeof event.is_error !== "boolean") throw new Error("Agent returned an invalid tool result status.");
+    if (!isWireBoolean(event.is_error)) throw new Error("Agent returned an invalid tool result status.");
     return {
       type,
       toolCallId: requiredString(event.tool_call_id, "tool call id"),

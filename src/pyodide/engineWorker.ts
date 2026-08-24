@@ -8,6 +8,7 @@ import schemasSource from "../engine/schemas.py?raw";
 import searchSource from "../engine/search.py?raw";
 import toolsSource from "../engine/tools.py?raw";
 import type { WireValue } from "../types";
+import { isWireString } from "../types";
 import { PYODIDE_INDEX_URL } from "./artifactCache";
 
 interface WorkerRequest {
@@ -136,7 +137,7 @@ async function execute(request: WorkerRequest): Promise<WireValue> {
   pyodide.globals.set("request_payload", payload);
   const streamCallback = request.stream
     ? (event: WireValue) => {
-        const eventJson = typeof event === "string" ? event : String(event);
+        const eventJson = isWireString(event) ? event : String(event);
         workerScope.postMessage({
           type: "stream",
           requestId: request.requestId,

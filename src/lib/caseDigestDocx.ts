@@ -1,4 +1,5 @@
 import type { WireValue } from "../types";
+import { isWireString } from "../types";
 import {
   AlignmentType,
   BorderStyle,
@@ -138,7 +139,7 @@ function isRecord(value: WireValue): value is Record<string, WireValue> {
 
 function requiredString(record: Record<string, WireValue>, key: string, path = key): string {
   const value = record[key];
-  if (typeof value !== "string") {
+  if (!isWireString(value)) {
     throw new TypeError(`Expected ${path} to be a string.`);
   }
   return value;
@@ -175,7 +176,7 @@ function parseIssue(value: WireValue, index: number): CaseDigestIssueInput {
   const path = `issues[${index}]`;
 
   if (Array.isArray(value)) {
-    if (value.length !== 2 || value.some((item) => typeof item !== "string")) {
+    if (value.length !== 2 || value.some((item) => !isWireString(item))) {
       throw new TypeError(`Expected ${path} to be a [ruling, ratio] string pair.`);
     }
     return [String(value[0]), String(value[1])];
@@ -204,7 +205,7 @@ function parseIssues(value: WireValue): CaseDigestIssueInput[] {
 
 /** Validate and type a parsed object or a JSON string before rendering it. */
 export function parseCaseDigestJson(input: WireValue): CaseDigest {
-  const value: WireValue = typeof input === "string" ? JSON.parse(input) : input;
+  const value: WireValue = isWireString(input) ? JSON.parse(input) : input;
   if (!isRecord(value)) {
     throw new TypeError("Expected case-digest JSON to be an object.");
   }

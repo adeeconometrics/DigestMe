@@ -4,7 +4,7 @@ import {
 } from "assistant-stream";
 import type { AssistantMessage, AssistantStreamChunk } from "assistant-stream";
 import type { ChatStreamEvent } from "../pyodide/types";
-import type { WireValue } from "../types";
+import { isWireString, type WireValue } from "../types";
 
 export interface ChatStreamAccumulator {
   /** Enqueue one validated bridge event without blocking the worker message handler. */
@@ -26,7 +26,7 @@ interface PartPath {
 
 function jsonText(value: WireValue): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value === "string") return value;
+  if (isWireString(value)) return value;
   const serialized = JSON.stringify(value);
   return serialized === undefined ? undefined : serialized;
 }

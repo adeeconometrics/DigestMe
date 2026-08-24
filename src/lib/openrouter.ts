@@ -1,4 +1,4 @@
-import type { WireValue } from "../types";
+import { isWireNumber, isWireString, type WireValue } from "../types";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
@@ -10,10 +10,10 @@ export interface OpenRouterModelOption {
 }
 
 interface ModelRecord {
-  id?: unknown;
-  name?: unknown;
-  description?: unknown;
-  context_length?: unknown;
+  id?: WireValue;
+  name?: WireValue;
+  description?: WireValue;
+  context_length?: WireValue;
 }
 
 interface ModelsResponse {
@@ -28,14 +28,14 @@ function parseModel(value: WireValue): OpenRouterModelOption | null {
   if (!isRecord(value)) return null;
 
   const model = value as ModelRecord;
-  if (typeof model.id !== "string" || !model.id.trim()) return null;
+  if (!isWireString(model.id) || !model.id.trim()) return null;
 
   const option: OpenRouterModelOption = {
     id: model.id,
-    name: typeof model.name === "string" && model.name.trim() ? model.name : model.id,
+    name: isWireString(model.name) && model.name.trim() ? model.name : model.id,
   };
-  if (typeof model.description === "string" && model.description.trim()) option.description = model.description;
-  if (typeof model.context_length === "number" && Number.isFinite(model.context_length)) {
+  if (isWireString(model.description) && model.description.trim()) option.description = model.description;
+  if (isWireNumber(model.context_length) && Number.isFinite(model.context_length)) {
     option.contextLength = model.context_length;
   }
   return option;
