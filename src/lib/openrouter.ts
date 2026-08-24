@@ -1,3 +1,5 @@
+import type { WireValue } from "../types";
+
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
 export interface OpenRouterModelOption {
@@ -18,7 +20,7 @@ interface ModelsResponse {
   data?: unknown;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null;
 }
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PdfProcessResult } from "@firecrawl/pdf-inspector-wasm";
 
 const mocks = vi.hoisted(() => ({
   init: vi.fn().mockResolvedValue(undefined),
@@ -28,7 +29,7 @@ function pdfFile(): File {
   return new File([new Uint8Array([1, 2, 3])], "case.pdf", { type: "application/pdf" });
 }
 
-function processResult(overrides: Partial<Record<string, unknown>> = {}) {
+function processResult(overrides: Partial<PdfProcessResult> = {}) {
   return {
     markdown: "# Title\nSome body text.",
     title: "Extracted title",

@@ -1,3 +1,4 @@
+import type { WireValue } from "../types";
 import {
   AlignmentType,
   BorderStyle,
@@ -131,11 +132,11 @@ const JUSTIFIED_CELL_TEXT: IParagraphOptions = {
   spacing: BODY_SPACING,
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requiredString(record: Record<string, unknown>, key: string, path = key): string {
+function requiredString(record: Record<string, WireValue>, key: string, path = key): string {
   const value = record[key];
   if (typeof value !== "string") {
     throw new TypeError(`Expected ${path} to be a string.`);
@@ -143,7 +144,7 @@ function requiredString(record: Record<string, unknown>, key: string, path = key
   return value;
 }
 
-function requiredStringArray(record: Record<string, unknown>, key: string, path = key): string[] {
+function requiredStringArray(record: Record<string, WireValue>, key: string, path = key): string[] {
   const value = record[key];
   if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) {
     throw new TypeError(`Expected ${path} to be an array of strings.`);

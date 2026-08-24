@@ -8,6 +8,7 @@ import {
   renderCaseDigestDocx,
 } from "../src/lib/caseDigestDocx";
 import type { CaseDigestIssueInput } from "../src/lib/caseDigestDocx";
+import type { WireValue } from "../src/types";
 import { buildCaseDigest, buildFacts, buildIssue, buildIssuePair } from "./factories";
 import rawMockJson from "./fixtures/case-digest.mock.json";
 
@@ -112,7 +113,7 @@ describe("parseCaseDigestJson", () => {
   it.each(["case_title", "petitioner", "respondent", "subject", "ponente", "gr_no_date"])(
     "throws with a field path when %s is missing",
     (field) => {
-      const digest: Record<string, unknown> = JSON.parse(JSON.stringify(buildCaseDigest()));
+      const digest: Record<string, WireValue> = JSON.parse(JSON.stringify(buildCaseDigest()));
       delete digest[field];
       expect(() => parseCaseDigestJson(digest)).toThrow(`Expected ${field} to be a string.`);
     },

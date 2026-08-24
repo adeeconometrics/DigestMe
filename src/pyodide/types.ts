@@ -1,6 +1,7 @@
 import { parseCaseDigestJson } from "../lib/caseDigestDocx";
 import type { CaseDigest } from "../lib/caseDigestDocx";
 import type { DocumentNode, DocumentNodeKind } from "../parser";
+import type { WireValue } from "../types";
 
 export interface AgentCredentials {
   modelId: string;
@@ -92,7 +93,7 @@ function parseReference(value: unknown): AgentReference {
     throw new Error("Agent returned an invalid document reference.");
   }
 
-  const reference = value as Record<string, unknown>;
+  const reference = value as Record<string, WireValue>;
   const page = reference.page;
   if (page !== null && (typeof page !== "number" || !Number.isInteger(page))) {
     throw new Error("Agent returned an invalid reference page.");
@@ -116,7 +117,7 @@ function parseExecution(value: unknown): AgentExecution {
     throw new Error("Agent returned an invalid execution result.");
   }
 
-  const result = value as Record<string, unknown>;
+  const result = value as Record<string, WireValue>;
   const elapsedMs = result.elapsed_ms;
   if (typeof elapsedMs !== "number" || !Number.isInteger(elapsedMs) || elapsedMs < 0) {
     throw new Error("Agent returned an invalid execution time.");
@@ -149,7 +150,7 @@ export function parseChatAgentResult(value: unknown): ChatAgentResult {
     throw new Error("Agent returned an invalid chat result.");
   }
 
-  const result = value as Record<string, unknown>;
+  const result = value as Record<string, WireValue>;
   return {
     ...parseExecution(result),
     markdown: requiredString(result.markdown, "markdown answer"),
@@ -162,7 +163,7 @@ export function parseCaseDigestAgentResult(value: unknown): CaseDigestAgentResul
     throw new Error("Agent returned an invalid digest result.");
   }
 
-  const result = value as Record<string, unknown>;
+  const result = value as Record<string, WireValue>;
   return {
     ...parseExecution(result),
     digest: parseCaseDigestJson(result.digest),
@@ -170,11 +171,11 @@ export function parseCaseDigestAgentResult(value: unknown): CaseDigestAgentResul
   };
 }
 
-function streamRecord(value: unknown): Record<string, unknown> {
+function streamRecord(value: unknown): Record<string, WireValue> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Agent returned an invalid chat stream event.");
   }
-  return value as Record<string, unknown>;
+  return value as Record<string, WireValue>;
 }
 
 function streamIndex(value: unknown): number {

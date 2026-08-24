@@ -46,6 +46,16 @@ export interface CsvValidationResult {
 export type Rating = "again" | "hard" | "known";
 export type AppView = "study" | "library" | "digest" | "settings";
 
+/** A structured value crossing a runtime boundary (JSON body or worker message) before field-level validation. */
+export type WireValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | WireValue[]
+  | { [key: string]: WireValue };
+
 export const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4o-mini";
 
 /** Lightweight listing entry derived from a stored ParsedDocument. */
