@@ -22,8 +22,12 @@ export interface ArtifactCacheDependencies {
   fetcher?: (request: Request) => Promise<Response>;
 }
 
+function isRequestString(value: Request | URL | string): value is string {
+  return typeof value === "string";
+}
+
 function requestUrl(request: Request | URL | string): URL {
-  if (typeof request === "string") return new URL(request);
+  if (isRequestString(request)) return new URL(request);
   if (request instanceof URL) return request;
   return new URL(request.url);
 }

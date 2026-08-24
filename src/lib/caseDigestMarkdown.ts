@@ -1,4 +1,4 @@
-import type { CaseDigest, CaseDigestIssueInput } from "./caseDigestDocx";
+import type { CaseDigest, CaseDigestIssue, CaseDigestIssueInput } from "./caseDigestDocx";
 
 function text(value: string): string {
   return value.trim() || "_Not stated._";
@@ -8,7 +8,7 @@ function list(items: string[]): string {
   return items.length ? items.map((item) => `- ${text(item)}`).join("\n") : "_Not stated._";
 }
 
-function normalizeIssue(issue: CaseDigestIssueInput): { issue?: string; ruling: string; ratio: string } {
+function normalizeIssue(issue: CaseDigestIssueInput): CaseDigestIssue {
   if (Array.isArray(issue)) return { ruling: issue[0], ratio: issue[1] };
   return issue;
 }

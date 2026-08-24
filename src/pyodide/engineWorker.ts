@@ -7,6 +7,8 @@ import documentSource from "../engine/document.py?raw";
 import schemasSource from "../engine/schemas.py?raw";
 import searchSource from "../engine/search.py?raw";
 import toolsSource from "../engine/tools.py?raw";
+import type { WireValue } from "../types";
+import { isWireString } from "../types";
 import { PYODIDE_INDEX_URL } from "./artifactCache";
 
 interface WorkerRequest {
@@ -20,16 +22,16 @@ interface WorkerRequest {
 }
 
 interface WorkerResponse {
-  type: "status" | "stream" | "result" | "error";
+  type: "status" | "stream" | "result" | "error" | "heartbeat" | "started";
   requestId?: number;
   state?: "idle" | "loading" | "ready" | "failed";
   message?: string;
-  event?: unknown;
-  result?: unknown;
+  event?: WireValue;
+  result?: WireValue;
 }
 
 const ENGINE_ROOT = "/tmp/digest-engine";
-const ENGINE_SOURCES: Record<string, string> = {
+const ENGINE_SOURCES = {
   "__init__.py": initSource,
   "agent.py": agentSource,
   "bridge.py": bridgeSource,
@@ -37,8 +39,9 @@ const ENGINE_SOURCES: Record<string, string> = {
   "schemas.py": schemasSource,
   "search.py": searchSource,
   "tools.py": toolsSource,
-};
+} satisfies Record<string, string>;
 
+// SAFETY: this module is bundled only as the engine Worker's entry, where globalThis carries the onmessage/postMessage contract declared below.
 const workerScope = globalThis as typeof globalThis & {
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
   postMessage: (message: WorkerResponse) => void;
@@ -47,11 +50,13 @@ const workerScope = globalThis as typeof globalThis & {
 let pyodidePromise: Promise<PyodideAPI> | undefined;
 
 function postStatus(state: WorkerResponse["state"], message?: string): void {
-  workerScope.postMessage({ type: "status", state, ...(message ? { message } : {}) });
+  const status: WorkerResponse = { type: "status", state };
+  if (message) status.message = message;
+  workerScope.postMessage(status);
 }
 
-function summarizeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "The case-digest agent failed.";
+function summarizeError(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : "The case-digest agent failed.";
   const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const summary = [...lines].reverse().find((line) => /^[\w.]+(?:Error|Exception):\s/.test(line)) ?? lines[lines.length - 1];
   if (!summary) return "The case-digest agent failed.";
@@ -90,16 +95,38 @@ from engine.bridge import run_request, run_request_stream
 }
 
 function getEngine(): Promise<PyodideAPI> {
-  pyodidePromise ??= loadEngine().catch((error: unknown) => {
-    const message = summarizeError(error);
+  pyodidePromise ??= loadEngine().catch((cause: unknown) => {
+    const message = summarizeError(cause);
     postStatus("failed", message);
     pyodidePromise = undefined;
-    throw error;
+    throw cause;
   });
   return pyodidePromise;
 }
 
-async function execute(request: WorkerRequest): Promise<unknown> {
+/**
+ * Cadence for liveness pings while a request is executing.
+ *
+ * Non-streaming digest runs can stay silent for minutes inside a single LLM
+ * call; the loader uses these pings to tell "busy" apart from "hung" so its
+ * inactivity timer does not kill healthy work (see engineLoader.ts).
+ */
+const HEARTBEAT_INTERVAL_MS = 20_000;
+
+let activeRequests = 0;
+let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+function setActiveRequests(count: number): void {
+  activeRequests = count;
+  if (activeRequests > 0 && heartbeatTimer === undefined) {
+    heartbeatTimer = setInterval(() => workerScope.postMessage({ type: "heartbeat" }), HEARTBEAT_INTERVAL_MS);
+  } else if (activeRequests === 0 && heartbeatTimer !== undefined) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  }
+}
+
+async function execute(request: WorkerRequest): Promise<WireValue> {
   const pyodide = await getEngine();
   const payload = JSON.stringify({
     command: request.command,
@@ -110,8 +137,8 @@ async function execute(request: WorkerRequest): Promise<unknown> {
   });
   pyodide.globals.set("request_payload", payload);
   const streamCallback = request.stream
-    ? (event: unknown) => {
-        const eventJson = typeof event === "string" ? event : String(event);
+    ? (event: WireValue) => {
+        const eventJson = isWireString(event) ? event : String(event);
         workerScope.postMessage({
           type: "stream",
           requestId: request.requestId,
@@ -135,12 +162,18 @@ let requestChain = Promise.resolve();
 workerScope.onmessage = (event) => {
   const request = event.data;
   requestChain = requestChain.then(async () => {
+    // Acknowledge the hand-off so the loader starts this request's inactivity
+    // timer only now — queued requests must not tick while they wait.
+    workerScope.postMessage({ type: "started", requestId: request.requestId });
+    setActiveRequests(activeRequests + 1);
     try {
       const result = await execute(request);
       workerScope.postMessage({ type: "result", requestId: request.requestId, result });
     } catch (error) {
       const message = summarizeError(error);
       workerScope.postMessage({ type: "error", requestId: request.requestId, message });
+    } finally {
+      setActiveRequests(activeRequests - 1);
     }
   });
 };

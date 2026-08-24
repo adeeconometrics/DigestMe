@@ -759,8 +759,8 @@ function ToolCallActivity({ tool, isStreaming }: { tool: AgentToolPart; isStream
   );
 }
 
-function displayStreamValue(value: unknown): string {
-  if (typeof value === "string") return value;
+function displayStreamValue<T>(value: T): string {
+  if (Object.prototype.toString.call(value) === "[object String]") return String(value);
   const serialized = JSON.stringify(value);
   return serialized ?? String(value);
 }

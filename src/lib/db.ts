@@ -29,7 +29,7 @@ export interface DocumentWithSource {
 let databasePromise: Promise<IDBDatabase> | undefined;
 
 function openDatabase(): Promise<IDBDatabase> {
-  if (typeof window === "undefined" || !window.indexedDB) {
+  if (!("indexedDB" in globalThis)) {
     return Promise.reject(new Error("IndexedDB is not available in this browser."));
   }
 
