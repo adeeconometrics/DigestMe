@@ -31,6 +31,7 @@ from .tools import DocumentContext
 
 DIGEST_PROMPT = "Create a complete case digest from the supplied source document."
 StreamEmitter = Callable[[str], object]
+_REQUEST_PAYLOADS: dict[int, str] = {}
 
 
 def _context(root: DocumentNode | Mapping[str, object]) -> DocumentContext:
@@ -262,48 +263,56 @@ def _required_root(request: Mapping[str, object]) -> Mapping[str, object]:
     return value
 
 
-async def run_request(payload: str) -> str:
+async def run_request(payload: str, request_id: int) -> str:
     """Dispatch one JSON request and return JSON for safe JS/Python boundary crossing."""
-    request: Any = json.loads(payload)
-    if not isinstance(request, Mapping):
-        raise ValueError("Request must be a JSON object")
+    _REQUEST_PAYLOADS[request_id] = payload
+    try:
+        request: Any = json.loads(_REQUEST_PAYLOADS[request_id])
+        if not isinstance(request, Mapping):
+            raise ValueError("Request must be a JSON object")
 
-    command = _required_string(request, "command")
-    root = _required_root(request)
-    api_key = _required_string(request, "api_key")
-    model_name = _required_string(request, "model_name")
+        command = _required_string(request, "command")
+        root = _required_root(request)
+        api_key = _required_string(request, "api_key")
+        model_name = _required_string(request, "model_name")
 
-    if command == "digest":
-        return (
-            await run_case_digest(root, api_key=api_key, model_name=model_name)
-        ).model_dump_json()
-    if command == "chat":
-        result = await run_chat(
-            root,
+        if command == "digest":
+            return (
+                await run_case_digest(root, api_key=api_key, model_name=model_name)
+            ).model_dump_json()
+        if command == "chat":
+            result = await run_chat(
+                root,
+                _required_string(request, "question"),
+                api_key=api_key,
+                model_name=model_name,
+            )
+            return result.model_dump_json()
+
+        raise ValueError(f"Unknown command: {command}")
+    finally:
+        _REQUEST_PAYLOADS.pop(request_id, None)
+
+
+async def run_request_stream(payload: str, request_id: int, emit: StreamEmitter) -> str:
+    """Dispatch a chat request and emit JSON events as the agent executes."""
+    _REQUEST_PAYLOADS[request_id] = payload
+    try:
+        request: Any = json.loads(_REQUEST_PAYLOADS[request_id])
+        if not isinstance(request, Mapping):
+            raise ValueError("Request must be a JSON object")
+
+        command = _required_string(request, "command")
+        if command != "chat":
+            raise ValueError("Streaming is only supported for chat requests")
+
+        result = await run_chat_stream(
+            _required_root(request),
             _required_string(request, "question"),
-            api_key=api_key,
-            model_name=model_name,
+            api_key=_required_string(request, "api_key"),
+            model_name=_required_string(request, "model_name"),
+            emit=emit,
         )
         return result.model_dump_json()
-
-    raise ValueError(f"Unknown command: {command}")
-
-
-async def run_request_stream(payload: str, emit: StreamEmitter) -> str:
-    """Dispatch a chat request and emit JSON events as the agent executes."""
-    request: Any = json.loads(payload)
-    if not isinstance(request, Mapping):
-        raise ValueError("Request must be a JSON object")
-
-    command = _required_string(request, "command")
-    if command != "chat":
-        raise ValueError("Streaming is only supported for chat requests")
-
-    result = await run_chat_stream(
-        _required_root(request),
-        _required_string(request, "question"),
-        api_key=_required_string(request, "api_key"),
-        model_name=_required_string(request, "model_name"),
-        emit=emit,
-    )
-    return result.model_dump_json()
+    finally:
+        _REQUEST_PAYLOADS.pop(request_id, None)

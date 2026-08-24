@@ -8,10 +8,12 @@ import schemasSource from "../engine/schemas.py?raw";
 import searchSource from "../engine/search.py?raw";
 import toolsSource from "../engine/tools.py?raw";
 import type { WireValue } from "../types";
-import { isWireString } from "../types";
+import { isWireString, isWireValue } from "../types";
 import { PYODIDE_INDEX_URL } from "./artifactCache";
+import { createRequestRegistry } from "./requestRegistry";
+import { createRequestScheduler } from "./requestScheduler";
 
-interface WorkerRequest {
+interface WorkerRunRequest {
   requestId: number;
   command: "chat" | "digest";
   root: unknown;
@@ -20,6 +22,13 @@ interface WorkerRequest {
   modelId: string;
   apiKey: string;
 }
+
+interface WorkerCancelRequest {
+  requestId: number;
+  command: "cancel";
+}
+
+type WorkerRequest = WorkerRunRequest | WorkerCancelRequest;
 
 interface WorkerResponse {
   type: "status" | "stream" | "result" | "error" | "heartbeat" | "started";
@@ -43,11 +52,29 @@ const ENGINE_SOURCES = {
 
 // SAFETY: this module is bundled only as the engine Worker's entry, where globalThis carries the onmessage/postMessage contract declared below.
 const workerScope = globalThis as typeof globalThis & {
-  onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
   postMessage: (message: WorkerResponse) => void;
 };
 
 let pyodidePromise: Promise<PyodideAPI> | undefined;
+const requestRegistry = createRequestRegistry();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRequestId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isWorkerRequest(value: unknown): value is WorkerRequest {
+  if (!isRecord(value) || !isRequestId(value.requestId) || typeof value.command !== "string") return false;
+  if (value.command === "cancel") return true;
+  if (value.command !== "chat" && value.command !== "digest") return false;
+  if (!("root" in value) || typeof value.modelId !== "string" || typeof value.apiKey !== "string") return false;
+  if (value.question !== undefined && typeof value.question !== "string") return false;
+  return value.stream === undefined || typeof value.stream === "boolean";
+}
 
 function postStatus(state: WorkerResponse["state"], message?: string): void {
   const status: WorkerResponse = { type: "status", state };
@@ -90,6 +117,7 @@ import sys
 sys.path.insert(0, ${JSON.stringify(ENGINE_ROOT)})
 from engine.bridge import run_request, run_request_stream
 `);
+  pyodide.globals.set("emit_stream", dispatchStream);
   postStatus("ready");
   return pyodide;
 }
@@ -116,6 +144,13 @@ const HEARTBEAT_INTERVAL_MS = 20_000;
 let activeRequests = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
+function dispatchStream(requestId: number, event: unknown): void {
+  const eventJson = isWireString(event) ? event : String(event);
+  const parsed: unknown = JSON.parse(eventJson);
+  if (!isWireValue(parsed)) throw new Error("The agent stream returned an invalid event.");
+  requestRegistry.dispatch(requestId, parsed);
+}
+
 function setActiveRequests(count: number): void {
   activeRequests = count;
   if (activeRequests > 0 && heartbeatTimer === undefined) {
@@ -126,8 +161,9 @@ function setActiveRequests(count: number): void {
   }
 }
 
-async function execute(request: WorkerRequest): Promise<WireValue> {
+async function execute(request: WorkerRunRequest, isCancelled: () => boolean): Promise<WireValue | undefined> {
   const pyodide = await getEngine();
+  if (isCancelled()) return undefined;
   const payload = JSON.stringify({
     command: request.command,
     root: request.root,
@@ -135,45 +171,52 @@ async function execute(request: WorkerRequest): Promise<WireValue> {
     model_name: request.modelId,
     api_key: request.apiKey,
   });
-  pyodide.globals.set("request_payload", payload);
-  const streamCallback = request.stream
-    ? (event: WireValue) => {
-        const eventJson = isWireString(event) ? event : String(event);
-        workerScope.postMessage({
-          type: "stream",
-          requestId: request.requestId,
-          event: JSON.parse(eventJson),
-        });
-      }
-    : undefined;
-  if (streamCallback) pyodide.globals.set("stream_callback", streamCallback);
+  requestRegistry.register(request.requestId, {
+    payload,
+    onStream: request.stream
+      ? (event: WireValue) => workerScope.postMessage({ type: "stream", requestId: request.requestId, event })
+      : undefined,
+  });
   try {
+    if (isCancelled()) return undefined;
     const pythonCall = request.stream
-      ? "await run_request_stream(request_payload, stream_callback)"
-      : "await run_request(request_payload)";
+      ? `await run_request_stream(${JSON.stringify(payload)}, ${request.requestId}, emit_stream)`
+      : `await run_request(${JSON.stringify(payload)}, ${request.requestId})`;
     const result = await pyodide.runPythonAsync(pythonCall);
+    if (isCancelled()) return undefined;
     return JSON.parse(String(result));
   } finally {
-    pyodide.runPython("request_payload = None\nstream_callback = None");
+    requestRegistry.remove(request.requestId);
   }
 }
 
-let requestChain = Promise.resolve();
-workerScope.onmessage = (event) => {
-  const request = event.data;
-  requestChain = requestChain.then(async () => {
-    // Acknowledge the hand-off so the loader starts this request's inactivity
-    // timer only now — queued requests must not tick while they wait.
-    workerScope.postMessage({ type: "started", requestId: request.requestId });
-    setActiveRequests(activeRequests + 1);
-    try {
-      const result = await execute(request);
+const MAX_CONCURRENT_REQUESTS = 2;
+const requestScheduler = createRequestScheduler<WorkerRunRequest>(MAX_CONCURRENT_REQUESTS, async (request, isCancelled) => {
+  if (isCancelled()) return;
+  workerScope.postMessage({ type: "started", requestId: request.requestId });
+  setActiveRequests(activeRequests + 1);
+  try {
+    const result = await execute(request, isCancelled);
+    if (!isCancelled() && result !== undefined) {
       workerScope.postMessage({ type: "result", requestId: request.requestId, result });
-    } catch (error) {
+    }
+  } catch (error) {
+    if (!isCancelled()) {
       const message = summarizeError(error);
       workerScope.postMessage({ type: "error", requestId: request.requestId, message });
-    } finally {
-      setActiveRequests(activeRequests - 1);
     }
-  });
+  } finally {
+    setActiveRequests(activeRequests - 1);
+  }
+});
+
+workerScope.onmessage = (event) => {
+  const request = event.data;
+  if (!isWorkerRequest(request)) return;
+  if (request.command === "cancel") {
+    requestRegistry.remove(request.requestId);
+    requestScheduler.cancel(request.requestId);
+    return;
+  }
+  requestScheduler.enqueue({ requestId: request.requestId, value: request });
 };
