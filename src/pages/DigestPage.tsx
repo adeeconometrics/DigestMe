@@ -211,8 +211,8 @@ export default function DigestPage({
   }, [onStorageError]);
 
   useEffect(() => {
-    onStatusChange?.(agentStatus);
-  }, [agentStatus, onStatusChange]);
+    onStatusChangeRef.current?.(agentStatus);
+  }, [agentStatus]);
 
   useEffect(() => {
     if (documentId === null) return undefined;

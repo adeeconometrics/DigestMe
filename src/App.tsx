@@ -115,7 +115,7 @@ export default function App() {
   });
   const [openPanel, setOpenPanel] = useState<"sessions" | "decks" | null>(null);
   const [documentSummaries, setDocumentSummaries] = useState<DocumentSummary[]>([]);
-  const [digestTabs, setDigestTabs] = useState<DigestTab[]>([newDigestTab()]);
+  const [digestTabs, setDigestTabs] = useState<DigestTab[]>(() => [newDigestTab()]);
   const [activeDigestTabId, setActiveDigestTabId] = useState(() => digestTabs[0].id);
   const [digestTabStatuses, setDigestTabStatuses] = useState<Record<string, DigestTabStatus>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -177,7 +177,7 @@ export default function App() {
   }, []);
 
   const handleDigestTabStatus = useCallback((tabId: string, status: DigestTabStatus): void => {
-    setDigestTabStatuses((previous) => ({ ...previous, [tabId]: status }));
+    setDigestTabStatuses((previous) => previous[tabId] === status ? previous : { ...previous, [tabId]: status });
   }, []);
 
   function openSettings(): void {
