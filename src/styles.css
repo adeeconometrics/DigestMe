@@ -186,6 +186,53 @@ input:focus-visible,
   border-left: 2px solid var(--paper-deep);
 }
 
+.session-history-list {
+  display: grid;
+  gap: 2px;
+}
+
+.session-sub-panel.has-session-history .session-history-list {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--paper-deep) transparent;
+  scrollbar-width: thin;
+}
+
+.session-sub-item {
+  align-items: flex-start;
+}
+
+.session-sub-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.session-sub-copy strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-sub-copy small {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.session-history-toggle {
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 9px 9px;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
 .sub-row {
   display: flex;
   align-items: center;
