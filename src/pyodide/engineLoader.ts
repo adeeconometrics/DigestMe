@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "assistant-stream";
 import type { DocumentNode } from "../parser";
+import type { WireValue } from "../types";
 import { createChatStreamAccumulator } from "../chat/agentStream";
 import {
   parseCaseDigestAgentResult,
@@ -30,13 +31,13 @@ interface WorkerStartedMessage {
 interface WorkerResultMessage {
   type: "result";
   requestId: number;
-  result: unknown;
+  result: WireValue;
 }
 
 interface WorkerStreamMessage {
   type: "stream";
   requestId: number;
-  event: unknown;
+  event: WireValue;
 }
 
 interface WorkerErrorMessage {
@@ -54,9 +55,9 @@ type WorkerResponse =
   | WorkerErrorMessage;
 
 interface PendingRequest {
-  resolve: (value: unknown) => void;
+  resolve: (value: WireValue) => void;
   reject: (reason: Error) => void;
-  onStream?: (event: unknown) => void;
+  onStream?: (event: WireValue) => void;
   /** Whether the worker acknowledged execution; queued requests ride the boot watchdog instead. */
   started: boolean;
   timer?: ReturnType<typeof setTimeout>;
@@ -180,7 +181,7 @@ function createWorker(): Worker {
   return nextWorker;
 }
 
-function requestAgent(request: AgentRequest, onStream?: (event: unknown) => void): Promise<unknown> {
+function requestAgent(request: AgentRequest, onStream?: (event: WireValue) => void): Promise<WireValue> {
   const activeWorker = worker ?? (worker = createWorker());
   const requestId = ++requestSequence;
   setEngineStatus({ state: "loading", message: "Preparing the on-device agent..." });

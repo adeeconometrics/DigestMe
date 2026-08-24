@@ -72,12 +72,12 @@ function emitTextDelta(worker: FakeWorker, requestId: number): void {
 }
 
 /** Attach a rejection handler synchronously so fake-timer expiries are not "unhandled". */
-function captureRejection(promise: Promise<unknown>): Promise<unknown> {
+function captureRejection<T>(promise: Promise<T>): Promise<Error> {
   return promise.then(
     () => {
       throw new Error("Expected the request to be rejected.");
     },
-    (error: unknown) => error,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
   );
 }
 

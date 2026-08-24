@@ -7,6 +7,7 @@ import documentSource from "../engine/document.py?raw";
 import schemasSource from "../engine/schemas.py?raw";
 import searchSource from "../engine/search.py?raw";
 import toolsSource from "../engine/tools.py?raw";
+import type { WireValue } from "../types";
 import { PYODIDE_INDEX_URL } from "./artifactCache";
 
 interface WorkerRequest {
@@ -24,8 +25,8 @@ interface WorkerResponse {
   requestId?: number;
   state?: "idle" | "loading" | "ready" | "failed";
   message?: string;
-  event?: unknown;
-  result?: unknown;
+  event?: WireValue;
+  result?: WireValue;
 }
 
 const ENGINE_ROOT = "/tmp/digest-engine";
@@ -123,7 +124,7 @@ function setActiveRequests(count: number): void {
   }
 }
 
-async function execute(request: WorkerRequest): Promise<unknown> {
+async function execute(request: WorkerRequest): Promise<WireValue> {
   const pyodide = await getEngine();
   const payload = JSON.stringify({
     command: request.command,
