@@ -21,7 +21,15 @@ interface ArtifactServiceWorkerScope {
   skipWaiting(): Promise<void>;
 }
 
-const serviceWorkerScope = globalThis as unknown as ArtifactServiceWorkerScope;
+function isArtifactServiceWorkerScope(value: {}): value is ArtifactServiceWorkerScope {
+  return "clients" in value && "skipWaiting" in value;
+}
+
+const scope = globalThis;
+if (!isArtifactServiceWorkerScope(scope)) {
+  throw new Error("Artifact service worker must run under a ServiceWorkerGlobalScope.");
+}
+const serviceWorkerScope: ArtifactServiceWorkerScope = scope;
 
 serviceWorkerScope.addEventListener("install", (event) => {
   event.waitUntil(serviceWorkerScope.skipWaiting());

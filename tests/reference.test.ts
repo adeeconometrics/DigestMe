@@ -12,7 +12,7 @@ function mockPage(
     pageNumber,
     getViewport: () => ({ transform: [1, 0, 0, 1, 0, 0] }),
     getTextContent: async () => ({ items }),
-  } as unknown as PDFPageProxy;
+  } as PDFPageProxy;
 }
 
 function indexWith(text: string, box: ReferenceBox, pageNumber = 4): PageTextIndex {
@@ -54,23 +54,24 @@ describe("indexPageText", () => {
 });
 
 describe("indexDocumentPage", () => {
-  function mockDocument(pageNumber: number): PDFDocumentProxy {
+  function mockDocument(): PDFDocumentProxy {
     return {
       numPages: 5,
-      getPage: async () => mockPage([{ str: "Hello", transform: [1, 0, 0, 1, 10, 20], width: 30 }], pageNumber),
-    } as unknown as PDFDocumentProxy;
+      getPage: async (pageNumber: number) =>
+        mockPage([{ str: "Hello", transform: [1, 0, 0, 1, 10, 20], width: 30 }], pageNumber),
+    } as PDFDocumentProxy;
   }
 
   it("indexes a requested page", async () => {
-    const index = await indexDocumentPage(mockDocument(5), 5);
+    const index = await indexDocumentPage(mockDocument(), 5);
 
     expect(index?.pageNumber).toBe(5);
     expect(index?.text).toBe("hello");
   });
 
   it("returns null for out-of-range page numbers", async () => {
-    expect(await indexDocumentPage(mockDocument(5), 0)).toBeNull();
-    expect(await indexDocumentPage(mockDocument(5), 6)).toBeNull();
+    expect(await indexDocumentPage(mockDocument(), 0)).toBeNull();
+    expect(await indexDocumentPage(mockDocument(), 6)).toBeNull();
   });
 });
 

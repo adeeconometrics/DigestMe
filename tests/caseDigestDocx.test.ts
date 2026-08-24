@@ -112,7 +112,7 @@ describe("parseCaseDigestJson", () => {
   it.each(["case_title", "petitioner", "respondent", "subject", "ponente", "gr_no_date"])(
     "throws with a field path when %s is missing",
     (field) => {
-      const digest = buildCaseDigest() as unknown as Record<string, unknown>;
+      const digest: Record<string, unknown> = JSON.parse(JSON.stringify(buildCaseDigest()));
       delete digest[field];
       expect(() => parseCaseDigestJson(digest)).toThrow(`Expected ${field} to be a string.`);
     },
@@ -130,21 +130,23 @@ describe("parseCaseDigestJson", () => {
   });
 
   it("throws when facts.petition is not an array of strings", () => {
-    const digest = buildCaseDigest({ facts: buildFacts({ petition: ["ok", 7] as unknown as string[] }) });
+    const digest = buildCaseDigest({
+      facts: buildFacts({ petition: JSON.parse(JSON.stringify(["ok", 7])) }),
+    });
     expect(() => parseCaseDigestJson(digest)).toThrow(
       "Expected facts.petition to be an array of strings.",
     );
   });
 
   it("throws when an issue pair has the wrong arity", () => {
-    const digest = buildCaseDigest({ issues: [["YES"] as unknown as [string, string]] });
+    const digest = buildCaseDigest({ issues: [JSON.parse(JSON.stringify(["YES"]))] });
     expect(() => parseCaseDigestJson(digest)).toThrow(
       "Expected issues[0] to be a [ruling, ratio] string pair.",
     );
   });
 
   it("throws when an issue object is missing its ruling", () => {
-    const issueWithoutRuling = { ratio: "Because." } as unknown as CaseDigestIssueInput;
+    const issueWithoutRuling: CaseDigestIssueInput = JSON.parse(JSON.stringify({ ratio: "Because." }));
     expect(() => parseCaseDigestJson(buildCaseDigest({ issues: [issueWithoutRuling] }))).toThrow(
       "Expected issues[0].ruling to be a string.",
     );
