@@ -5,6 +5,9 @@ import { clearAgentApiKey, loadAgentSettings, saveAgentSettings, validateApiKey 
 import type { AgentSettingsStatus } from "../lib/agentSettings";
 import { fetchOpenRouterModels, isOpenRouterModelId } from "../lib/openrouter";
 import type { OpenRouterModelOption } from "../lib/openrouter";
+import { disposeEngine } from "../pyodide/engineLoader";
+import { evictRuntimeStore, getRuntimeStoreStatus } from "../pyodide/runtimeStore";
+import type { RuntimeStoreStatus } from "../pyodide/runtimeStore";
 import { DEFAULT_OPENROUTER_MODEL } from "../types";
 
 type CatalogStatus = "loading" | "ready" | "error";
@@ -33,6 +36,9 @@ export default function SettingsPage({ onBackToStudy }: SettingsPageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStoreStatus>("checking");
+  const [runtimeError, setRuntimeError] = useState("");
+  const [isReinstallingRuntime, setIsReinstallingRuntime] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -45,6 +51,16 @@ export default function SettingsPage({ onBackToStudy }: SettingsPageProps) {
       .catch(() => {
         if (mounted) setStatus({ modelId: "", hasApiKey: false });
       });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    void getRuntimeStoreStatus().then((nextStatus) => {
+      if (mounted) setRuntimeStatus(nextStatus);
+    });
     return () => {
       mounted = false;
     };
@@ -118,6 +134,33 @@ export default function SettingsPage({ onBackToStudy }: SettingsPageProps) {
       setError("The stored API key could not be removed.");
     }
   }
+
+  async function handleReinstallRuntime(): Promise<void> {
+    if (!window.confirm("Reinstall the agent runtime? In-flight agent runs will be stopped, and the local runtime cache will be removed.")) return;
+    setRuntimeError("");
+    setIsReinstallingRuntime(true);
+    try {
+      disposeEngine();
+      await evictRuntimeStore();
+      setRuntimeStatus("not-cached");
+    } catch (cause: unknown) {
+      setRuntimeStatus("error");
+      setRuntimeError(cause instanceof Error ? cause.message : "The agent runtime could not be reinstalled.");
+    } finally {
+      setIsReinstallingRuntime(false);
+    }
+  }
+
+  const runtimeStatusLabel = runtimeStatus === "checking"
+    ? "checking runtime"
+    : runtimeStatus === "cached"
+      ? "runtime cached"
+      : runtimeStatus === "not-cached"
+        ? "installs on first run"
+        : runtimeStatus === "unavailable"
+          ? "local cache unavailable"
+          : "runtime status unavailable";
+  const runtimeStatusClass = runtimeStatus === "cached" ? "is-ready" : runtimeStatus === "error" || runtimeStatus === "unavailable" ? "is-error" : "";
 
   function retryCatalog(): void {
     setCatalogStatus("loading");
@@ -217,6 +260,17 @@ export default function SettingsPage({ onBackToStudy }: SettingsPageProps) {
 
             {error && <p className="settings-form-error" role="alert">{error}</p>}
             <a className="settings-key-link" href="https://openrouter.ai/keys" rel="noreferrer" target="_blank">Create or revoke a key <Icon name="arrow-right" size={13} /></a>
+          </section>
+
+          <section className="settings-card settings-runtime-card">
+            <div className="settings-card-top"><span className="settings-step">03 / runtime</span><span className={`settings-card-status ${runtimeStatusClass}`}><span className="settings-status-dot" />{runtimeStatusLabel}</span></div>
+            <h2>Keep your <em>runtime close.</em></h2>
+            <p className="settings-card-intro">The agent dependencies are cached in a version-keyed local store after the first verified install. If storage is unavailable, the agent still installs ephemerally.</p>
+            <div className="settings-runtime-controls">
+              <button className="primary-button settings-runtime-action" disabled={isReinstallingRuntime} onClick={() => void handleReinstallRuntime()} type="button"><Icon name="refresh" size={15} />{isReinstallingRuntime ? "Reinstalling..." : "Reinstall agent runtime"}</button>
+              <span className="settings-runtime-note">Only the dependency store is removed. Your artifact cache stays intact.</span>
+            </div>
+            {runtimeError && <p className="settings-form-error" role="alert">{runtimeError}</p>}
           </section>
         </div>
 

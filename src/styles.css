@@ -4168,6 +4168,28 @@ input:focus-visible,
   line-height: 1.55;
 }
 
+.settings-runtime-card {
+  grid-column: 1 / -1;
+}
+
+.settings-runtime-controls {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-top: 20px;
+}
+
+.settings-runtime-action {
+  flex: 0 0 auto;
+}
+
+.settings-runtime-note {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .settings-field {
   display: grid;
   gap: 7px;
@@ -4592,6 +4614,11 @@ input:focus-visible,
 
   .settings-card-intro {
     min-height: 0;
+  }
+
+  .settings-runtime-controls {
+    display: grid;
+    align-items: start;
   }
 
   .settings-security {
