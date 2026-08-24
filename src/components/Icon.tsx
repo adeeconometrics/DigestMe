@@ -35,7 +35,7 @@ interface IconProps {
 
 /** Small inline icons keep the interface crisp without adding a UI dependency. */
 export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: IconProps) {
-  const paths: Record<IconName, ReactNode> = {
+  const paths = {
     "arrow-right": <><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></>,
     book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z" /><path d="M4 5.5v16" /><path d="M8 7h8" /><path d="M8 11h6" /></>,
     cards: <><rect x="5" y="5" width="13" height="15" rx="2" /><path d="M8 2h9a2 2 0 0 1 2 2v14" /><path d="M9 10h5" /><path d="M9 14h3" /></>,
@@ -60,7 +60,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: 
     trash: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="m7 7 .8 13h8.4L17 7" /><path d="M10 11v5M14 11v5" /></>,
     tree: <><circle cx="12" cy="4.5" r="2" /><circle cx="5.5" cy="19.5" r="2" /><circle cx="18.5" cy="19.5" r="2" /><path d="M12 6.5V12" /><path d="m12 12-5.4 5.8" /><path d="m12 12 5.4 5.8" /></>,
     upload: <><path d="M12 16V4" /><path d="m7 9 5-5 5 5" /><path d="M5 15v4h14v-4" /></>,
-  };
+  } satisfies Record<IconName, ReactNode>;
 
   return (
     <svg

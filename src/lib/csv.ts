@@ -5,12 +5,17 @@ interface ParsedRow {
   line: number;
 }
 
+interface ParsedRows {
+  rows: ParsedRow[];
+  unclosedQuoteLine?: number;
+}
+
 /**
  * Reads the small, intentionally strict CSV format used by Digest Me.
  * Quoted commas, escaped quotes, and quoted line breaks are supported without
  * sending the uploaded file anywhere outside the browser.
  */
-function parseRows(source: string): { rows: ParsedRow[]; unclosedQuoteLine?: number } {
+function parseRows(source: string): ParsedRows {
   const rows: ParsedRow[] = [];
   const text = source.replace(/^\uFEFF/, "");
   let cells: string[] = [];

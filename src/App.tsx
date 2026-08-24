@@ -9,12 +9,12 @@ import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Ra
 const DigestPage = lazy(() => import("./pages/DigestPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
-const VIEW_ROUTES: Record<AppView, string> = {
+const VIEW_ROUTES = {
   study: "#/study",
   library: "#/library",
   digest: "#/digest",
   settings: "#/settings",
-};
+} satisfies Record<AppView, string>;
 
 function viewFromHash(hash: string): AppView {
   if (hash === "#/library") return "library";

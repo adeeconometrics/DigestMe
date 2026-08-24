@@ -88,11 +88,13 @@ describe("parseCaseDigestJson", () => {
   });
 
   it("accepts null optional fields emitted by Pydantic", () => {
-    const digest = {
-      ...buildCaseDigest(),
-      facts: { petition: ["Petition fact."], petitioner_version: null, respondent_version: null },
-      issues: [{ issue: null, ruling: "YES", ratio: "Because." }],
-    } as unknown;
+    const digest = JSON.parse(
+      JSON.stringify({
+        ...buildCaseDigest(),
+        facts: { petition: ["Petition fact."], petitioner_version: null, respondent_version: null },
+        issues: [{ issue: null, ruling: "YES", ratio: "Because." }],
+      }),
+    );
 
     const parsed = parseCaseDigestJson(digest);
     expect(parsed.facts).toEqual({ petition: ["Petition fact."] });

@@ -29,7 +29,7 @@ interface WorkerResponse {
 }
 
 const ENGINE_ROOT = "/tmp/digest-engine";
-const ENGINE_SOURCES: Record<string, string> = {
+const ENGINE_SOURCES = {
   "__init__.py": initSource,
   "agent.py": agentSource,
   "bridge.py": bridgeSource,
@@ -37,7 +37,7 @@ const ENGINE_SOURCES: Record<string, string> = {
   "schemas.py": schemasSource,
   "search.py": searchSource,
   "tools.py": toolsSource,
-};
+} satisfies Record<string, string>;
 
 const workerScope = globalThis as typeof globalThis & {
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
