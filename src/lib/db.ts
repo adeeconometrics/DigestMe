@@ -1,16 +1,54 @@
 import { STARTER_DECK } from "../data/starter";
+import {
+  sortDigestSessionSummaries,
+  summarizeDigestSession,
+  type DigestSession,
+  type DigestSessionAsset,
+  type DigestSessionSummary,
+  type PersistedChatMessage,
+} from "../chat/session";
 import type { ParsedDocument } from "../parser";
 import { flattenTree } from "../parser";
 import type { Deck, DocumentSummary, StudySession } from "../types";
 
 const DATABASE_NAME = "recall-studio";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const DECK_STORE = "decks";
 const SESSION_STORE = "sessions";
 const META_STORE = "meta";
 const DOCUMENT_STORE = "documents";
 const DOCUMENT_FILE_STORE = "documentFiles";
+const CHAT_SESSION_STORE = "chatSessions";
+const DIGEST_FILE_STORE = "digestFiles";
 const STARTER_SEEDED_KEY = "starter-seeded";
+
+function legacyDigestSession(document: ParsedDocument): DigestSession {
+  const at = document.parsedAt;
+  const messages: PersistedChatMessage[] = [
+    { id: `legacy-welcome-${document.id}`, at, role: "assistant", kind: "welcome" },
+    { id: `legacy-attachment-${document.id}`, at, role: "user", kind: "attachment", fileName: document.fileName },
+    {
+      id: `legacy-summary-${document.id}`,
+      at,
+      role: "assistant",
+      kind: "parse-summary",
+      fileName: document.fileName,
+      pageCount: document.metrics.pageCount,
+      nodeCount: flattenTree(document.root).length,
+      ms: document.metrics.processingTimeMs,
+      pdfType: document.metrics.pdfType,
+    },
+  ];
+
+  return {
+    id: `digest-${document.id}`,
+    title: document.fileName,
+    documentId: document.id,
+    createdAt: at,
+    updatedAt: at,
+    messages,
+  };
+}
 
 /** The PDF source bytes that must accompany every stored document tree. */
 export interface StoredDocumentFile {
@@ -24,6 +62,14 @@ export interface StoredDocumentFile {
 export interface DocumentWithSource {
   document: ParsedDocument;
   file: StoredDocumentFile;
+}
+
+export type StoredDigestFile = DigestSessionAsset;
+
+export interface DigestSessionData {
+  session: DigestSession;
+  source?: DocumentWithSource;
+  digestFiles: StoredDigestFile[];
 }
 
 let databasePromise: Promise<IDBDatabase> | undefined;
@@ -40,6 +86,8 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const database = request.result;
+      const hadDocumentStore = database.objectStoreNames.contains(DOCUMENT_STORE);
+      const hadChatSessionStore = database.objectStoreNames.contains(CHAT_SESSION_STORE);
       if (!database.objectStoreNames.contains(DECK_STORE)) {
         database.createObjectStore(DECK_STORE, { keyPath: "id" });
       }
@@ -71,6 +119,34 @@ function openDatabase(): Promise<IDBDatabase> {
               if (hasFile.result === 0) cursor.delete();
               cursor.continue();
             };
+          };
+        }
+      }
+      if (!database.objectStoreNames.contains(CHAT_SESSION_STORE)) {
+        const chatSessions = database.createObjectStore(CHAT_SESSION_STORE, { keyPath: "id" });
+        chatSessions.createIndex("updatedAt", "updatedAt", { unique: false });
+        chatSessions.createIndex("documentId", "documentId", { unique: false });
+      }
+      if (!database.objectStoreNames.contains(DIGEST_FILE_STORE)) {
+        const digestFiles = database.createObjectStore(DIGEST_FILE_STORE, { keyPath: "id" });
+        digestFiles.createIndex("sessionId", "sessionId", { unique: false });
+      }
+
+      // Documents created by v3 were already session-shaped in the UI. Give
+      // them a durable transcript shell instead of leaving them orphaned.
+      if (!hadChatSessionStore && hadDocumentStore) {
+        const upgradeTransaction = request.transaction;
+        if (upgradeTransaction) {
+          const documents = upgradeTransaction.objectStore(DOCUMENT_STORE);
+          const chatSessions = upgradeTransaction.objectStore(CHAT_SESSION_STORE);
+          const cursorRequest = documents.openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            // SAFETY: the documents store contains ParsedDocument records written by this module.
+            const document = cursor.value as ParsedDocument;
+            chatSessions.put(legacyDigestSession(document));
+            cursor.continue();
           };
         }
       }
@@ -172,6 +248,126 @@ export async function removeSessionsForDeck(deckId: string): Promise<void> {
     const request = store.index("deckId").openCursor(IDBKeyRange.only(deckId));
     request.onsuccess = () => {
       const cursor = request.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
+export async function getDigestSessionSummaries(): Promise<DigestSessionSummary[]> {
+  const database = await openDatabase();
+  const sessions = await requestValue<DigestSession[]>(
+    database.transaction(CHAT_SESSION_STORE, "readonly").objectStore(CHAT_SESSION_STORE).getAll(),
+  );
+  return sortDigestSessionSummaries(sessions.map(summarizeDigestSession));
+}
+
+/** Load a transcript together with the PDF and DOCX assets it owns. */
+export async function getDigestSession(sessionId: string): Promise<DigestSessionData | undefined> {
+  const database = await openDatabase();
+  const transaction = database.transaction(
+    [CHAT_SESSION_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+    "readonly",
+  );
+  const [session, documents, documentFiles, digestFiles] = await Promise.all([
+    requestValue<DigestSession | undefined>(transaction.objectStore(CHAT_SESSION_STORE).get(sessionId)),
+    requestValue<ParsedDocument[]>(transaction.objectStore(DOCUMENT_STORE).getAll()),
+    requestValue<StoredDocumentFile[]>(transaction.objectStore(DOCUMENT_FILE_STORE).getAll()),
+    requestValue<StoredDigestFile[]>(
+      transaction.objectStore(DIGEST_FILE_STORE).index("sessionId").getAll(IDBKeyRange.only(sessionId)),
+    ),
+  ]);
+  if (!session) return undefined;
+
+  if (!session.documentId) return { session, digestFiles };
+  const document = documents.find((candidate) => candidate.id === session.documentId);
+  const file = documentFiles.find((candidate) => candidate.id === session.documentId);
+  return {
+    session,
+    digestFiles,
+    ...(document && file ? { source: { document, file } } : {}),
+  };
+}
+
+export async function getDigestSessionAssets(sessionId: string): Promise<StoredDigestFile[]> {
+  const database = await openDatabase();
+  return requestValue<StoredDigestFile[]>(
+    database.transaction(DIGEST_FILE_STORE, "readonly").objectStore(DIGEST_FILE_STORE).index("sessionId").getAll(IDBKeyRange.only(sessionId)),
+  );
+}
+
+/** Persist a transcript and its owned source/assets in one IndexedDB transaction. */
+export async function putDigestSession(
+  session: DigestSession,
+  source?: DocumentWithSource,
+  digestFiles?: StoredDigestFile[],
+): Promise<void> {
+  if (source && source.document.id !== session.documentId) {
+    throw new Error("A digest session source must match its document reference.");
+  }
+  if (digestFiles?.some((file) => file.sessionId !== session.id)) {
+    throw new Error("A digest session can only store assets that belong to it.");
+  }
+
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(
+      [CHAT_SESSION_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+      "readwrite",
+    );
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
+
+    transaction.objectStore(CHAT_SESSION_STORE).put(session);
+    if (source) {
+      transaction.objectStore(DOCUMENT_STORE).put(source.document);
+      transaction.objectStore(DOCUMENT_FILE_STORE).put(source.file);
+    }
+    if (digestFiles === undefined) return;
+
+    const filesById = new Map(digestFiles.map((file) => [file.id, file]));
+    const digestStore = transaction.objectStore(DIGEST_FILE_STORE);
+    for (const file of digestFiles) digestStore.put(file);
+    const cursorRequest = digestStore.index("sessionId").openCursor(IDBKeyRange.only(session.id));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      if (!filesById.has(cursor.value.id)) cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
+/** Delete a digest session and every PDF/DOCX object owned by that session. */
+export async function removeDigestSession(sessionId: string): Promise<void> {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(
+      [CHAT_SESSION_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+      "readwrite",
+    );
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
+
+    const sessionStore = transaction.objectStore(CHAT_SESSION_STORE);
+    const sessionRequest = sessionStore.get(sessionId);
+    sessionRequest.onsuccess = () => {
+      // SAFETY: chatSessions is only written with the DigestSession shape by this module.
+      const session = sessionRequest.result as DigestSession | undefined;
+      sessionStore.delete(sessionId);
+      if (session?.documentId) {
+        transaction.objectStore(DOCUMENT_STORE).delete(session.documentId);
+        transaction.objectStore(DOCUMENT_FILE_STORE).delete(session.documentId);
+      }
+    };
+
+    const digestStore = transaction.objectStore(DIGEST_FILE_STORE);
+    const cursorRequest = digestStore.index("sessionId").openCursor(IDBKeyRange.only(sessionId));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
       if (!cursor) return;
       cursor.delete();
       cursor.continue();

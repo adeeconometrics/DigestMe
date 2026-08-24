@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   getDecks,
   getDecksWithStarter,
+  getDigestSession,
+  getDigestSessionAssets,
+  getDigestSessionSummaries,
   getDocument,
   getDocumentFile,
   getDocumentSummaries,
@@ -9,9 +12,11 @@ import {
   getDocuments,
   getSessions,
   putDeck,
+  putDigestSession,
   putDocumentWithFile,
   putSession,
   removeDeck,
+  removeDigestSession,
   removeDocument,
   removeSessionsForDeck,
 } from "../src/lib/db";
@@ -20,6 +25,7 @@ import {
   buildBlock,
   buildDeck,
   buildDocumentNode,
+  buildDigestSession,
   buildParsedDocument,
   buildSection,
   buildSession,
@@ -44,6 +50,12 @@ async function removeAllSessions(): Promise<void> {
 async function removeAllDocuments(): Promise<void> {
   for (const document of await getDocuments()) {
     await removeDocument(document.id);
+  }
+}
+
+async function removeAllDigestSessions(): Promise<void> {
+  for (const session of await getDigestSessionSummaries()) {
+    await removeDigestSession(session.id);
   }
 }
 
@@ -202,5 +214,78 @@ describe("documents", () => {
         nodeCount: 4,
       },
     ]);
+  });
+});
+
+describe("digest chat sessions", () => {
+  beforeEach(async () => {
+    await removeAllDigestSessions();
+  });
+
+  function pdfFile(): File {
+    return new File([new Uint8Array([1, 2, 3])], "case.pdf", { type: "application/pdf" });
+  }
+
+  it("persists the transcript, response, source PDF, and generated DOCX", async () => {
+    const session = buildDigestSession({ documentId: "doc-chat" });
+    const document = buildParsedDocument({ id: "doc-chat" });
+    const digestFile = {
+      id: "docx-chat-answer",
+      sessionId: session.id,
+      fileName: "case-digest.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      blob: new Blob([new Uint8Array([4, 5, 6])]),
+    };
+
+    await putDigestSession(
+      session,
+      {
+        document,
+        file: { id: document.id, fileName: "case.pdf", mimeType: "application/pdf", blob: pdfFile() },
+      },
+      [digestFile],
+    );
+
+    const restored = await getDigestSession(session.id);
+    expect(restored?.session).toEqual(session);
+    expect(restored?.session.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "agent-answer", markdown: "The answer was stored locally." }),
+    ]));
+    expect(restored?.source?.document).toEqual(document);
+    expect(restored?.source?.file.blob.size).toBe(3);
+    expect(restored?.digestFiles).toEqual([digestFile]);
+  });
+
+  it("orders session summaries by most recent activity", async () => {
+    await putDigestSession(buildDigestSession({ id: "digest-old", updatedAt: "2026-08-01T10:00:00.000Z" }));
+    await putDigestSession(buildDigestSession({ id: "digest-new", updatedAt: "2026-08-02T10:00:00.000Z" }));
+
+    const summaries = await getDigestSessionSummaries();
+    expect(summaries.map((summary) => summary.id)).toEqual(["digest-new", "digest-old"]);
+    expect(summaries[0]).toMatchObject({ title: "case.pdf", messageCount: 3 });
+  });
+
+  it("cascades the source PDF and DOCX assets when a session is deleted", async () => {
+    const session = buildDigestSession({ documentId: "doc-delete" });
+    const document = buildParsedDocument({ id: "doc-delete" });
+    const digestFile = {
+      id: "docx-delete-answer",
+      sessionId: session.id,
+      fileName: "case-digest.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      blob: new Blob([new Uint8Array([7, 8])]),
+    };
+    await putDigestSession(
+      session,
+      { document, file: { id: document.id, fileName: "case.pdf", mimeType: "application/pdf", blob: pdfFile() } },
+      [digestFile],
+    );
+
+    await removeDigestSession(session.id);
+
+    expect(await getDigestSession(session.id)).toBeUndefined();
+    expect(await getDigestSessionAssets(session.id)).toEqual([]);
+    expect(await getDocument(document.id)).toBeUndefined();
+    expect(await getDocumentFile(document.id)).toBeUndefined();
   });
 });

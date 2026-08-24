@@ -8,6 +8,7 @@ export type IconName =
   | "chevron-down"
   | "chevron-left"
   | "chevron-right"
+  | "chevron-up"
   | "close"
   | "clock"
   | "edit"
@@ -43,6 +44,7 @@ export default function Icon({ name, size = 18, strokeWidth = 1.8, className }: 
     "chevron-down": <path d="m6 9 6 6 6-6" />,
     "chevron-left": <path d="m15 18-6-6 6-6" />,
     "chevron-right": <path d="m9 6 6 6-6 6" />,
+    "chevron-up": <path d="m6 15 6-6 6 6" />,
     close: <><path d="m6 6 12 12" /><path d="m18 6-12 12" /></>,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>,
     edit: <><path d="m14.5 5.5 4 4" /><path d="m4 20 3.3-.7L19.7 6.9a2.1 2.1 0 0 0-3-3L4.7 16.3 4 20Z" /><path d="m14 7 3 3" /></>,

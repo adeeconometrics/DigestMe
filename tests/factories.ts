@@ -5,6 +5,7 @@ import type {
   CaseDigestIssueInput,
 } from "../src/lib/caseDigestDocx";
 import type { DocumentNode, ParseMetrics, ParsedDocument } from "../src/parser";
+import type { DigestSession, PersistedChatMessage } from "../src/chat/session";
 import type { Deck, Flashcard, StudySession } from "../src/types";
 
 /**
@@ -121,6 +122,31 @@ export function buildSession(overrides: Partial<StudySession> = {}): StudySessio
     known: 1,
     hard: 0,
     again: 0,
+    ...overrides,
+  };
+}
+
+export function buildDigestSession(overrides: Partial<DigestSession> = {}): DigestSession {
+  const messages: PersistedChatMessage[] = [
+    { id: "chat-welcome", at: "2026-08-01T09:00:00.000Z", role: "assistant", kind: "welcome" },
+    { id: "chat-question", at: "2026-08-01T09:01:00.000Z", role: "user", kind: "question", text: "What happened?" },
+    {
+      id: "chat-answer",
+      at: "2026-08-01T09:02:00.000Z",
+      role: "assistant",
+      kind: "agent-answer",
+      markdown: "The answer was stored locally.",
+      refs: [],
+      execution: { model: "test-model", elapsedMs: 12 },
+    },
+  ];
+  return {
+    id: "digest-session-1",
+    title: "case.pdf",
+    documentId: null,
+    createdAt: "2026-08-01T09:00:00.000Z",
+    updatedAt: "2026-08-01T09:02:00.000Z",
+    messages,
     ...overrides,
   };
 }
