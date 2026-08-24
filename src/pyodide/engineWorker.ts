@@ -41,6 +41,7 @@ const ENGINE_SOURCES = {
   "tools.py": toolsSource,
 } satisfies Record<string, string>;
 
+// SAFETY: this module is bundled only as the engine Worker's entry, where globalThis carries the onmessage/postMessage contract declared below.
 const workerScope = globalThis as typeof globalThis & {
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
   postMessage: (message: WorkerResponse) => void;

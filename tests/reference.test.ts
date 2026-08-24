@@ -8,6 +8,7 @@ function mockPage(
   items: Array<{ str: string; transform: number[]; width: number }>,
   pageNumber = 2,
 ): PDFPageProxy {
+  // SAFETY: the mock supplies the pageNumber, getViewport, and getTextContent members indexPageText consumes; the rest of pdf.js's class surface stays unused.
   return {
     pageNumber,
     getViewport: () => ({ transform: [1, 0, 0, 1, 0, 0] }),
@@ -55,6 +56,7 @@ describe("indexPageText", () => {
 
 describe("indexDocumentPage", () => {
   function mockDocument(): PDFDocumentProxy {
+    // SAFETY: the mock supplies the numPages and getPage members indexDocumentPage consumes; the remaining pdf.js surface stays unused.
     return {
       numPages: 5,
       getPage: async (pageNumber: number) =>

@@ -9,17 +9,6 @@ export interface OpenRouterModelOption {
   contextLength?: number;
 }
 
-interface ModelRecord {
-  id?: WireValue;
-  name?: WireValue;
-  description?: WireValue;
-  context_length?: WireValue;
-}
-
-interface ModelsResponse {
-  data?: unknown;
-}
-
 function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null;
 }
@@ -27,16 +16,15 @@ function isRecord(value: WireValue): value is Record<string, WireValue> {
 function parseModel(value: WireValue): OpenRouterModelOption | null {
   if (!isRecord(value)) return null;
 
-  const model = value as ModelRecord;
-  if (!isWireString(model.id) || !model.id.trim()) return null;
+  if (!isWireString(value.id) || !value.id.trim()) return null;
 
   const option: OpenRouterModelOption = {
-    id: model.id,
-    name: isWireString(model.name) && model.name.trim() ? model.name : model.id,
+    id: value.id,
+    name: isWireString(value.name) && value.name.trim() ? value.name : value.id,
   };
-  if (isWireString(model.description) && model.description.trim()) option.description = model.description;
-  if (isWireNumber(model.context_length) && Number.isFinite(model.context_length)) {
-    option.contextLength = model.context_length;
+  if (isWireString(value.description) && value.description.trim()) option.description = value.description;
+  if (isWireNumber(value.context_length) && Number.isFinite(value.context_length)) {
+    option.contextLength = value.context_length;
   }
   return option;
 }
@@ -64,7 +52,7 @@ export async function fetchOpenRouterModels(signal?: AbortSignal, cache: Request
   }
 
   if (!isRecord(payload)) throw new Error("OpenRouter returned an invalid model catalog.");
-  const data = (payload as ModelsResponse).data;
+  const data = payload.data;
   if (!Array.isArray(data)) throw new Error("OpenRouter returned an invalid model catalog.");
 
   return data

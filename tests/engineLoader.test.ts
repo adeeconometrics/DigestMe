@@ -54,6 +54,7 @@ function lastWorker(): FakeWorker {
 
 /** The loader echoes the requestId back on every postMessage; index counts back from the latest. */
 function postedRequestId(worker: FakeWorker, offsetFromEnd = 0): number {
+  // SAFETY: the loader only posts request messages, and every request carries a numeric requestId.
   const message = worker.sent[worker.sent.length - 1 - offsetFromEnd] as { requestId: number };
   return message.requestId;
 }

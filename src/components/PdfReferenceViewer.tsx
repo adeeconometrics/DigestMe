@@ -138,6 +138,7 @@ export default function PdfReferenceViewer({ file, fileName, referenceNode }: Pd
       (entries) => {
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
+          // SAFETY: the observer only attaches to .pdf-page elements, so each target is an HTMLElement carrying a page dataset entry.
           const pageNumber = Number((entry.target as HTMLElement).dataset.page);
           if (Number.isFinite(pageNumber)) void ensurePageRendered(pageNumber);
         }
@@ -154,8 +155,10 @@ export default function PdfReferenceViewer({ file, fileName, referenceNode }: Pd
         const rect = container.getBoundingClientRect();
         const middle = rect.top + rect.height / 2;
         for (const child of Array.from(container.children)) {
+          // SAFETY: every child of the pages container is a rendered .pdf-page div.
           const childRect = (child as HTMLElement).getBoundingClientRect();
           if (childRect.top <= middle && childRect.bottom >= middle) {
+            // SAFETY: same .pdf-page invariant as above; the dataset page was set when the page was rendered.
             setVisiblePage(Number((child as HTMLElement).dataset.page));
             break;
           }
