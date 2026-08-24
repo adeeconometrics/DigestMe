@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, RefObject } from "react";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
@@ -191,6 +191,13 @@ export default function App() {
   const currentCard = activeDeck?.cards.find((card) => card.id === currentCardId);
   const totalCards = decks.reduce((sum, deck) => sum + deck.cards.length, 0);
   const progress = isComplete || !studyOrder.length ? (isComplete ? 100 : 0) : (currentIndex / studyOrder.length) * 100;
+  const runningDocumentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tab of digestTabs) {
+      if (tab.documentId && digestTabStatuses[tab.id] === "running") ids.add(tab.documentId);
+    }
+    return ids;
+  }, [digestTabs, digestTabStatuses]);
 
   useEffect(() => {
     let mounted = true;
@@ -503,6 +510,7 @@ export default function App() {
         onToggleCollapse={toggleRail}
         onTogglePanel={togglePanel}
         openPanel={openPanel}
+        runningDocumentIds={runningDocumentIds}
         view={view}
       />
 
@@ -704,6 +712,7 @@ interface SidebarProps {
   decks: Deck[];
   documents: DocumentSummary[];
   openPanel: "sessions" | "decks" | null;
+  runningDocumentIds: Set<string>;
   view: AppView;
   onSetView: (view: AppView) => void;
   onToggleCollapse: () => void;
@@ -732,6 +741,7 @@ function Sidebar({
   onToggleCollapse,
   onTogglePanel,
   openPanel,
+  runningDocumentIds,
   view,
 }: SidebarProps) {
   return (
@@ -784,7 +794,11 @@ function Sidebar({
                 {documents.map((document) => (
                   <div className={`sub-row session-sub-row ${activeDocumentId === document.id ? "active" : ""}`} key={document.id}>
                     <button className="sub-item session-sub-item" onClick={() => onOpenDocument(document.id)} type="button">
-                      <Icon name="tree" size={13} />
+                      {runningDocumentIds.has(document.id) ? (
+                        <span aria-label="Digest agent connected and running" className="agent-spin session-sub-spin" role="status" />
+                      ) : (
+                        <Icon name="tree" size={13} />
+                      )}
                       <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages</small></span>
                     </button>
                   </div>

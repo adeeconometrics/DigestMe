@@ -594,7 +594,13 @@ export default function DigestPage({
       <section className="session-chat">
         <header className="session-header">
           <div className="session-title">
-            <span className="session-mark"><Icon name="spark" size={16} /></span>
+            <span className="session-mark">
+              {agentStatus === "running" ? (
+                <span aria-label="Digest agent connected and running" className="agent-spin session-mark-spin" role="status" />
+              ) : (
+                <Icon name="spark" size={16} />
+              )}
+            </span>
             <div>
               <strong>{selected ? selected.fileName : "Case digest session"}</strong>
               <small>{selected ? `${selected.metrics.pageCount} pages · parsed on-device` : "attach a case file to begin"}</small>
@@ -752,7 +758,13 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
 
   return (
     <div className="chat-row is-assistant">
-      <span className="chat-avatar"><Icon name="tree" size={15} /></span>
+      <span className="chat-avatar">
+        {message.kind === "agent-stream" ? (
+          <span aria-label="Agent connected and streaming" className="agent-spin chat-avatar-spin" role="status" />
+        ) : (
+          <Icon name="tree" size={15} />
+        )}
+      </span>
       <div className="chat-bubble bubble-assistant">
         {message.kind === "welcome" && (
           <>

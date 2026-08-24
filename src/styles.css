@@ -3602,6 +3602,53 @@ input:focus-visible,
   to { opacity: 1; transform: scale(1.1); }
 }
 
+/* Orbiting twin-dot spinner that replaces session icons while the agent is connected and running. */
+.agent-spin {
+  --spin-size: 15px;
+  width: var(--spin-size);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--lime-dark);
+  display: grid;
+  animation: agent-spin-revolve 2s linear infinite;
+  flex: 0 0 auto;
+}
+
+.agent-spin::before,
+.agent-spin::after {
+  content: "";
+  grid-area: 1 / 1;
+  margin: 15%;
+  border-radius: 50%;
+  background: inherit;
+  transform: rotate(0deg) translate(150%);
+  animation: agent-spin-orbit 1s infinite;
+}
+
+.agent-spin::after {
+  animation-delay: -0.5s;
+}
+
+.session-sub-spin {
+  --spin-size: 12px;
+}
+
+.session-mark-spin {
+  --spin-size: 15px;
+}
+
+.chat-avatar-spin {
+  --spin-size: 15px;
+}
+
+@keyframes agent-spin-revolve {
+  100% { transform: rotate(1turn); }
+}
+
+@keyframes agent-spin-orbit {
+  100% { transform: rotate(1turn) translate(150%); }
+}
+
 @keyframes stream-caret {
   from { opacity: 0.25; }
   to { opacity: 1; }
