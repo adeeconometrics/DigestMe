@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent, RefObject } from "react";
 import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
+import { createDigestQueue } from "./lib/digestQueue";
 import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
 import { isPdfFile } from "./parser";
 import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
@@ -42,10 +43,11 @@ interface DigestTab {
   id: string;
   documentId: string | null;
   autoRunDigest?: boolean;
+  queuePosition?: number;
   pendingFile?: File | null;
 }
 
-type DigestTabStatus = "idle" | "running" | "complete" | "failed";
+type DigestTabStatus = "idle" | "queued" | "running" | "complete" | "failed";
 
 const EMPTY_STATS: SessionStats = { reviewed: 0, known: 0, hard: 0, again: 0 };
 
@@ -121,6 +123,7 @@ export default function App() {
   const [digestTabs, setDigestTabs] = useState<DigestTab[]>(() => [newDigestTab()]);
   const [activeDigestTabId, setActiveDigestTabId] = useState(() => digestTabs[0].id);
   const [digestTabStatuses, setDigestTabStatuses] = useState<Record<string, DigestTabStatus>>({});
+  const digestQueueRef = useRef(createDigestQueue());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toggleRail(): void {
@@ -159,8 +162,19 @@ export default function App() {
         setOpenPanel(null);
         return;
       }
-      const autoRunDigest = files.length > 1;
-      const tabs = pdfs.map((file) => ({ ...newDigestTab(file), autoRunDigest }));
+      const shouldQueueDigests = pdfs.length > 1;
+      const tabDrafts = pdfs.map((file) => newDigestTab(file));
+      const queueItems = shouldQueueDigests
+        ? digestQueueRef.current.enqueue(tabDrafts.map((tab) => tab.id))
+        : [];
+      const queueItemsById = new Map(queueItems.map((item) => [item.id, item]));
+      const firstQueuedTabId = queueItems[0]?.id;
+      const tabs = tabDrafts.map((tab) => {
+        const queueItem = queueItemsById.get(tab.id);
+        return queueItem
+          ? { ...tab, autoRunDigest: tab.id === firstQueuedTabId, queuePosition: queueItem.position }
+          : tab;
+      });
       setDigestTabs((previous) => [...previous, ...tabs]);
       setActiveDigestTabId(tabs[0].id);
       setView("digest");
@@ -179,13 +193,17 @@ export default function App() {
   function closeDigestTab(tabId: string): void {
     const index = digestTabs.findIndex((tab) => tab.id === tabId);
     if (index < 0) return;
+    const nextQueuedTabId = digestQueueRef.current.remove(tabId);
     const remaining = digestTabs.filter((tab) => tab.id !== tabId);
     if (remaining.length === 0) {
       const replacement = newDigestTab();
       setDigestTabs([replacement]);
       setActiveDigestTabId(replacement.id);
     } else {
-      setDigestTabs(remaining);
+      const nextTabs = nextQueuedTabId
+        ? remaining.map((tab) => tab.id === nextQueuedTabId ? { ...tab, autoRunDigest: true } : tab)
+        : remaining;
+      setDigestTabs(nextTabs);
       if (activeDigestTabId === tabId) setActiveDigestTabId(remaining[Math.min(index, remaining.length - 1)].id);
     }
     setDigestTabStatuses((previous) => {
@@ -202,6 +220,11 @@ export default function App() {
 
   const handleDigestTabStatus = useCallback((tabId: string, status: DigestTabStatus): void => {
     setDigestTabStatuses((previous) => previous[tabId] === status ? previous : { ...previous, [tabId]: status });
+    if (status !== "complete" && status !== "failed") return;
+    const nextQueuedTabId = digestQueueRef.current.finish(tabId);
+    if (nextQueuedTabId) {
+      setDigestTabs((previous) => previous.map((tab) => tab.id === nextQueuedTabId ? { ...tab, autoRunDigest: true } : tab));
+    }
   }, []);
 
   function openSettings(): void {
@@ -223,6 +246,13 @@ export default function App() {
     }
     return statuses;
   }, [digestTabs, digestTabStatuses]);
+  const documentQueuePositions = useMemo(() => {
+    const positions = new Map<string, number>();
+    for (const tab of digestTabs) {
+      if (tab.documentId && tab.queuePosition !== undefined) positions.set(tab.documentId, tab.queuePosition);
+    }
+    return positions;
+  }, [digestTabs]);
 
   useEffect(() => {
     let mounted = true;
@@ -535,6 +565,7 @@ export default function App() {
         onToggleCollapse={toggleRail}
         onTogglePanel={togglePanel}
         openPanel={openPanel}
+        documentQueuePositions={documentQueuePositions}
         documentStatuses={documentStatuses}
         view={view}
       />
@@ -692,6 +723,16 @@ function DigestWorkspace({
           const document = tab.documentId ? documents.find((candidate) => candidate.id === tab.documentId) : undefined;
           const status = statuses[tab.id] ?? "idle";
           const title = document?.fileName ?? "New document";
+          const queueLabel = tab.queuePosition === undefined ? "" : ` · queue #${tab.queuePosition}`;
+          const statusLabel = status === "queued"
+            ? `Waiting in digest queue${tab.queuePosition === undefined ? "" : `, position ${tab.queuePosition}`}`
+            : status === "running"
+              ? "Digest agent connected and running"
+              : status === "complete"
+                ? "Digest complete and ready to view"
+                : status === "failed"
+                  ? "Digest agent stopped unexpectedly"
+                  : undefined;
           return (
             <div className={`digest-tab ${activeTabId === tab.id ? "is-active" : ""}`} key={tab.id}>
               <button
@@ -701,8 +742,12 @@ function DigestWorkspace({
                 role="tab"
                 type="button"
               >
-                <span className={`digest-tab-status is-${status}`} />
-                <span className="digest-tab-copy"><strong>{title}</strong><small>{document ? `${document.pageCount} pages` : "Attach a PDF"}</small></span>
+                {status === "queued" ? (
+                  <span aria-label={statusLabel} className="loader digest-tab-loader" role="status" />
+                ) : (
+                  <span aria-label={statusLabel} className={`digest-tab-status is-${status}`} role={statusLabel ? "status" : undefined} />
+                )}
+                <span className="digest-tab-copy"><strong>{title}</strong><small>{document ? `${document.pageCount} pages${queueLabel}` : tab.queuePosition === undefined ? "Attach a PDF" : `Queued · position ${tab.queuePosition}`}</small></span>
               </button>
               <button aria-label={`Close ${title}`} className="digest-tab-close" onClick={() => onCloseTab(tab.id)} title={`Close ${title}`} type="button">
                 <Icon name="close" size={13} />
@@ -720,6 +765,7 @@ function DigestWorkspace({
             <DigestPage
               autoRunDigest={tab.autoRunDigest ?? false}
               documentId={tab.documentId}
+              queuePosition={tab.queuePosition}
               onDocumentReady={(summary) => onDocumentReady(tab.id, summary)}
               onStatusChange={(status) => onStatusChange(tab.id, status)}
               onStorageError={onStorageError}
@@ -738,6 +784,7 @@ interface SidebarProps {
   collapsed: boolean;
   decks: Deck[];
   documents: DocumentSummary[];
+  documentQueuePositions: ReadonlyMap<string, number>;
   documentStatuses: ReadonlyMap<string, DigestTabStatus>;
   openPanel: "sessions" | "decks" | null;
   view: AppView;
@@ -757,6 +804,7 @@ function Sidebar({
   activeDeckId,
   collapsed,
   decks,
+  documentQueuePositions,
   documentStatuses,
   documents,
   onDeleteDeck,
@@ -844,7 +892,10 @@ function Sidebar({
               <div className="session-history-list">
                 {documents.map((document) => {
                   const status = documentStatuses.get(document.id) ?? "idle";
-                  const statusLabel = status === "running"
+                  const queuePosition = documentQueuePositions.get(document.id);
+                  const statusLabel = status === "queued"
+                    ? queuePosition === undefined ? "Waiting for the digest agent" : `Waiting in digest queue, position ${queuePosition}`
+                    : status === "running"
                     ? "Digest agent connected and running"
                     : status === "complete"
                       ? "Digest complete and ready to view"
@@ -860,11 +911,11 @@ function Sidebar({
                           role={statusLabel ? "status" : undefined}
                           title={statusLabel}
                         >
-                          {status === "running" ? <span aria-hidden="true" className="agent-spin session-sub-spin" /> : <Icon name="tree" size={13} />}
+                          {status === "queued" ? <span aria-hidden="true" className="loader session-sub-loader" /> : status === "running" ? <span aria-hidden="true" className="agent-spin session-sub-spin" /> : <Icon name="tree" size={13} />}
                           {status === "complete" && <span aria-hidden="true" className="session-sub-complete" />}
                           {status === "failed" && <span aria-hidden="true" className="session-sub-failed" />}
                         </span>
-                        <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages</small></span>
+                        <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages{queuePosition === undefined ? "" : ` · queue #${queuePosition}`}</small></span>
                       </button>
                     </div>
                   );

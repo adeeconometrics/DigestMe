@@ -23,7 +23,7 @@ import {
   type DigestSession,
   type PersistedChatMessage,
 } from "../chat/session";
-import { cancelAgentRequest, disposeEngine, runCaseDigestAgent, streamChatAgent } from "../pyodide/engineLoader";
+import { cancelAgentRequest, disposeEngine, runCaseDigestAgent, streamChatAgent, type AgentRequestState } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
 import type { DocumentSummary } from "../types";
 
@@ -31,7 +31,7 @@ const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer")
 const DocxPreviewModal = lazy(() => import("../components/DocxPreviewModal"));
 
 type DigestStatus = "idle" | "parsing" | "error";
-type AgentStatus = "idle" | "running" | "complete" | "failed";
+type AgentStatus = "idle" | "queued" | "running" | "complete" | "failed";
 
 function makeMessageId(): string {
   const randomId = globalThis.crypto?.randomUUID?.();
@@ -56,6 +56,7 @@ interface DigestPreview {
 interface DigestPageProps {
   documentId: string | null;
   autoRunDigest?: boolean;
+  queuePosition?: number;
   pendingFile?: File | null;
   onDocumentReady?: (summary: DocumentSummary) => void;
   onStatusChange?: (status: AgentStatus) => void;
@@ -76,6 +77,7 @@ interface ThreadSnapshot {
 export default function DigestPage({
   documentId,
   autoRunDigest,
+  queuePosition,
   pendingFile,
   onDocumentReady,
   onStatusChange,
@@ -90,7 +92,7 @@ export default function DigestPage({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>(() => queuePosition === undefined ? "idle" : "queued");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<DigestPreview | null>(null);
@@ -165,7 +167,7 @@ export default function DigestPage({
   /** Connect to the agent and compose the structured case digest for a parsed document. */
   const runCaseDigest = useCallback(async (selectedDocument: ParsedDocument): Promise<void> => {
     const requestId = ++agentRequestRef.current;
-    setAgentStatus("running");
+    setAgentStatus("queued");
     const credentials = await getAgentRuntimeCredentials().catch(() => null);
     if (requestId !== agentRequestRef.current) return;
     if (!credentials) {
@@ -181,6 +183,9 @@ export default function DigestPage({
         } else {
           cancelAgentRequest(loaderRequestId);
         }
+      },
+      onRequestState: (nextState: AgentRequestState) => {
+        if (requestId === agentRequestRef.current) setAgentStatus(nextState);
       },
     };
 
@@ -338,7 +343,7 @@ export default function DigestPage({
         setPreview(null);
         setMessages(restoredMessages);
         digestReadyRef.current = digestReady;
-        setAgentStatus(digestReady ? "complete" : "idle");
+        setAgentStatus(digestReady ? "complete" : queuePosition === undefined ? "idle" : "queued");
         lastPersistedFingerprintRef.current = "";
         if (autoRunDigest && !digestReady && !autoRunConsumedRef.current) {
           autoRunConsumedRef.current = true;
@@ -348,13 +353,14 @@ export default function DigestPage({
       } catch (error) {
         if (!mounted) return;
         setStatus("error");
+        if (queuePosition !== undefined) setAgentStatus("failed");
         pushError(error instanceof Error ? error.message : "That document could not be loaded from local storage.");
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [autoRunDigest, clearDocxAssets, documentId, pushError, pushMessage, runCaseDigest]);
+  }, [autoRunDigest, clearDocxAssets, documentId, pushError, pushMessage, queuePosition, runCaseDigest]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -386,7 +392,7 @@ export default function DigestPage({
     }
 
     digestReadyRef.current = false;
-    setAgentStatus("idle");
+    setAgentStatus(queuePosition === undefined ? "idle" : "queued");
     const requestId = ++agentRequestRef.current;
     setStatus("parsing");
     try {
@@ -449,6 +455,7 @@ export default function DigestPage({
       });
     } catch (error) {
       setStatus("error");
+      if (queuePosition !== undefined) setAgentStatus("failed");
       pushError(error instanceof Error ? error.message : "This PDF could not be parsed.");
     }
   }
@@ -471,7 +478,7 @@ export default function DigestPage({
   }
 
   async function submitQuestion(rawQuestion: string): Promise<void> {
-    if (status === "parsing" || agentStatus === "running") return;
+    if (status === "parsing" || agentStatus === "queued" || agentStatus === "running") return;
     const question = rawQuestion.trim();
     if (!question) return;
     const requestId = ++agentRequestRef.current;
@@ -501,6 +508,9 @@ export default function DigestPage({
           cancelAgentRequest(loaderRequestId);
         }
       },
+      onRequestState: (nextState: AgentRequestState) => {
+        if (requestId === agentRequestRef.current) setAgentStatus(nextState);
+      },
     };
 
     if (!credentials) {
@@ -515,7 +525,7 @@ export default function DigestPage({
       return;
     }
 
-    setAgentStatus("running");
+    setAgentStatus("queued");
     const streamMessageId = makeMessageId();
     const streamStartedAt = Date.now();
     let latestAssistant = createInitialAssistantMessage();
@@ -622,7 +632,7 @@ export default function DigestPage({
     setSelectedNodeId(node.id);
   }
 
-  const isBusy = status === "parsing" || agentStatus === "running";
+  const isBusy = status === "parsing" || agentStatus === "queued" || agentStatus === "running";
 
   return (
     <div
@@ -640,6 +650,7 @@ export default function DigestPage({
         <div className="chat-log" ref={logRef}>
           {messages.map((message) => (
             <ChatBubble
+              agentStatus={agentStatus}
               key={message.id}
               message={message}
               onPreviewDocx={handlePreviewDigest}
@@ -649,6 +660,12 @@ export default function DigestPage({
         </div>
 
         <div className="chat-composer-shell">
+          {agentStatus === "queued" && (
+            <div className="agent-progress is-queued" role="status">
+              <span aria-hidden="true" className="loader agent-queue-loader" />
+              <span>{queuePosition === undefined ? "Waiting for the case-digest agent..." : `Queued for digest processing · position ${queuePosition}`}</span>
+            </div>
+          )}
           {agentStatus === "running" && (
             <div className="agent-progress" role="status">
               <span className="agent-progress-dot" />
@@ -759,12 +776,13 @@ export default function DigestPage({
 }
 
 interface ChatBubbleProps {
+  agentStatus: AgentStatus;
   message: ChatMessage;
   onPreviewDocx: (message: Extract<ChatMessage, { kind: "digest" }>) => void;
   onReferenceClick: (hit: RetrievalHit) => void;
 }
 
-function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProps) {
+function ChatBubble({ agentStatus, message, onPreviewDocx, onReferenceClick }: ChatBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="chat-row is-user">
@@ -786,7 +804,11 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
     <div className="chat-row is-assistant">
       <span className="chat-avatar">
         {message.kind === "agent-stream" ? (
-          <span aria-label="Agent connected and streaming" className="agent-spin chat-avatar-spin" role="status" />
+          agentStatus === "queued" ? (
+            <span aria-label="Agent request is waiting in the queue" className="loader chat-avatar-loader" role="status" />
+          ) : (
+            <span aria-label="Agent connected and streaming" className="agent-spin chat-avatar-spin" role="status" />
+          )
         ) : (
           <Icon name="tree" size={15} />
         )}

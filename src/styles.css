@@ -3573,6 +3573,50 @@ input:focus-visible,
   animation: none;
 }
 
+.agent-progress.is-queued {
+  color: var(--ink-soft);
+}
+
+.loader {
+  --loader-color: var(--ink);
+  --c: var(--loader-color) 90%, #0000;
+  display: block;
+  width: 60px;
+  aspect-ratio: 4;
+  flex: 0 0 auto;
+  background:
+    radial-gradient(circle closest-side at left 6px top 50%, var(--c)),
+    radial-gradient(circle closest-side, var(--c)),
+    radial-gradient(circle closest-side at right 6px top 50%, var(--c));
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  animation: l4 1s infinite alternate;
+}
+
+.agent-queue-loader {
+  width: 36px;
+  --loader-color: var(--ink-soft);
+}
+
+.digest-tab-loader {
+  width: 24px;
+  --loader-color: var(--lime-dark);
+}
+
+.session-sub-loader {
+  width: 18px;
+  --loader-color: var(--ink-soft);
+}
+
+.chat-avatar-loader {
+  width: 24px;
+  --loader-color: var(--ink);
+}
+
+@keyframes l4 {
+  to { width: 25px; aspect-ratio: 1; }
+}
+
 .agent-progress-dot {
   width: 6px;
   height: 6px;
