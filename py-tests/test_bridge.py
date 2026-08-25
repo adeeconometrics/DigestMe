@@ -16,6 +16,7 @@ from pydantic_core import ValidationError
 from engine.agent import build_agent, build_chat_agent
 from engine.bridge import (
     AgentRunError,
+    _bind_stream_request_id,
     _last_reply_diagnostic,
     _translate_agent_error,
     run_case_digest,
@@ -163,6 +164,20 @@ def test_run_chat_rejects_empty_questions(document_tree: DocumentNode) -> None:
                 agent=agent,
             )
         )
+
+
+def test_bind_stream_request_id_forwards_request_id_and_payload() -> None:
+    """The JS dispatcher routes by request id, so the emitter must carry it."""
+    calls: list[tuple[int, str]] = []
+
+    def emit(request_id: int, payload: str) -> None:
+        calls.append((request_id, payload))
+
+    payload = '{"type": "start", "model": "test/chat", "started_at": 1}'
+    bound = _bind_stream_request_id(emit, 42)
+    bound(payload)
+
+    assert calls == [(42, payload)]
 
 
 def _truncated_json_error() -> ValidationError:

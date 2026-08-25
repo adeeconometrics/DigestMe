@@ -787,16 +787,18 @@ export default function DigestPage({
           </div>
           <form className="chat-composer" onSubmit={handleAsk}>
             <input accept=".pdf,application/pdf" className="visually-hidden" onChange={handleFileChange} ref={fileInputRef} type="file" />
-            <button
-              aria-label="Attach a PDF"
-              className={`composer-attach ${status === "parsing" ? "is-busy" : ""}`}
-              disabled={isBusy}
-              onClick={() => fileInputRef.current?.click()}
-              title={status === "parsing" ? "Parsing on-device..." : "Attach a PDF"}
-              type="button"
-            >
-              <Icon name="upload" size={17} />
-            </button>
+            {!selected && (
+              <button
+                aria-label="Attach a PDF"
+                className={`composer-attach ${status === "parsing" ? "is-busy" : ""}`}
+                disabled={isBusy}
+                onClick={() => fileInputRef.current?.click()}
+                title={status === "parsing" ? "Parsing on-device..." : "Attach a PDF"}
+                type="button"
+              >
+                <Icon name="upload" size={17} />
+              </button>
+            )}
             <input
               aria-label="Ask about the document"
               autoComplete="off"
