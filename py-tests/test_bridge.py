@@ -172,7 +172,6 @@ def test_bind_stream_request_id_forwards_request_id_and_payload() -> None:
 
     def emit(request_id: int, payload: str) -> object:
         calls.append((request_id, payload))
-        return None
 
     payload = '{"type": "start", "model": "test/chat", "started_at": 1}'
     bound = _bind_stream_request_id(emit, 42)
