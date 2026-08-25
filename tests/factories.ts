@@ -2,7 +2,6 @@ import type {
   CaseDigest,
   CaseDigestFacts,
   CaseDigestIssue,
-  CaseDigestIssueInput,
 } from "../src/lib/caseDigestDocx";
 import type { DocumentNode, ParseMetrics, ParsedDocument } from "../src/parser";
 import type { ChatThread, DigestSession, PersistedChatMessage } from "../src/chat/session";
@@ -42,6 +41,8 @@ export function buildCaseDigest(overrides: Partial<CaseDigest> = {}): CaseDigest
 export function buildFacts(overrides: Partial<CaseDigestFacts> = {}): CaseDigestFacts {
   return {
     petition: ["Fact one.", "Fact two."],
+    petitioner_version: [],
+    respondent_version: [],
     ...overrides,
   };
 }
@@ -53,10 +54,6 @@ export function buildIssue(overrides: Partial<CaseDigestIssue> = {}): CaseDigest
     ratio: "Because of the doctrine.",
     ...overrides,
   };
-}
-
-export function buildIssuePair(ruling = "YES", ratio = "Because of the doctrine."): CaseDigestIssueInput {
-  return [ruling, ratio];
 }
 
 // --- Document tree (src/parser, src/graph, src/pdf, src/chat) ---

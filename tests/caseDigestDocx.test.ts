@@ -7,9 +7,8 @@ import {
   parseCaseDigestJson,
   renderCaseDigestDocx,
 } from "../src/lib/caseDigestDocx";
-import type { CaseDigestIssueInput } from "../src/lib/caseDigestDocx";
 import type { WireValue } from "../src/types";
-import { buildCaseDigest, buildFacts, buildIssue, buildIssuePair } from "./factories";
+import { buildCaseDigest, buildFacts, buildIssue } from "./factories";
 import rawMockJson from "./fixtures/case-digest.mock.json";
 
 // The fixture JSON is the single source of the typed mock; parsing it here
@@ -71,29 +70,32 @@ describe("parseCaseDigestJson", () => {
     expect(digest.class_notes).toHaveLength(2);
   });
 
-  it("accepts issues in the short [ruling, ratio] pair form", () => {
-    const digest = buildCaseDigest({ issues: [buildIssuePair(), buildIssuePair("NO", "No basis.")] });
-    expect(parseCaseDigestJson(wire(digest)).issues).toEqual([
-      ["YES", "Because of the doctrine."],
-      ["NO", "No basis."],
+  it("normalizes legacy issue pairs to object form", () => {
+    const digest = wire({
+      ...buildCaseDigest(),
+      issues: [["YES", "Because of the doctrine."], ["NO", "No basis."]],
+    });
+    expect(parseCaseDigestJson(digest).issues).toEqual([
+      { issue: "", ruling: "YES", ratio: "Because of the doctrine." },
+      { issue: "", ruling: "NO", ratio: "No basis." },
     ]);
   });
 
-  it("preserves the optional issue statement on object-form issues", () => {
+  it("fills missing issue fields on object-form issues", () => {
     const digest = buildCaseDigest({ issues: [buildIssue({ issue: "WON procedure was followed." })] });
     expect(parseCaseDigestJson(wire(digest)).issues).toEqual([
       { issue: "WON procedure was followed.", ruling: "YES", ratio: "Because of the doctrine." },
     ]);
   });
 
-  it("preserves optional petitioner and respondent fact versions", () => {
+  it("preserves petitioner and respondent fact versions", () => {
     const digest = buildCaseDigest({
       facts: buildFacts({ respondent_version: ["Their version."] }),
     });
     expect(parseCaseDigestJson(wire(digest)).facts?.respondent_version).toEqual(["Their version."]);
   });
 
-  it("accepts null optional fields emitted by Pydantic", () => {
+  it("normalizes null fields emitted by Pydantic", () => {
     const digest = JSON.parse(
       JSON.stringify({
         ...buildCaseDigest(),
@@ -103,20 +105,20 @@ describe("parseCaseDigestJson", () => {
     );
 
     const parsed = parseCaseDigestJson(digest);
-    expect(parsed.facts).toEqual({ petition: ["Petition fact."] });
-    expect(parsed.issues).toEqual([{ ruling: "YES", ratio: "Because." }]);
+    expect(parsed.facts).toEqual({ petition: ["Petition fact."], petitioner_version: [], respondent_version: [] });
+    expect(parsed.issues).toEqual([{ issue: "", ruling: "YES", ratio: "Because." }]);
   });
 
-  it("accepts a digest with unsupported elements missing", () => {
+  it("normalizes a digest with unsupported elements missing", () => {
     const digest: Record<string, WireValue> = JSON.parse(JSON.stringify(buildCaseDigest()));
     delete digest.summary;
     digest.facts = { petition: null };
     digest.issues = null;
 
     const parsed = parseCaseDigestJson(digest);
-    expect(parsed.summary).toBeUndefined();
-    expect(parsed.facts).toEqual({});
-    expect(parsed.issues).toBeUndefined();
+    expect(parsed.summary).toBe("");
+    expect(parsed.facts).toEqual({ petition: [], petitioner_version: [], respondent_version: [] });
+    expect(parsed.issues).toEqual([]);
   });
 
   it("drops unknown keys instead of persisting them", () => {
@@ -132,10 +134,28 @@ describe("parseCaseDigestJson", () => {
     expect(() => parseCaseDigestJson("{not json")).toThrow(SyntaxError);
   });
 
-  it("accepts a completely empty digest", () => {
+  it("normalizes a completely empty digest", () => {
     const parsed = parseCaseDigestJson({});
-    expect(parsed.case_title).toBeUndefined();
-    expect(parsed.facts).toEqual({});
+    expect(parsed).toEqual({
+      case_title: "",
+      petitioner: "",
+      respondent: "",
+      topic_subtopic: "",
+      subject: "",
+      ponente: "",
+      gr_no_date: "",
+      full_text: "",
+      summary: "",
+      doctrine: "",
+      provisions: "",
+      facts: { petition: [], petitioner_version: [], respondent_version: [] },
+      petitioners_arguments: [],
+      respondents_arguments: [],
+      procedural_posture: [],
+      issues: [],
+      supreme_court_ruling: "",
+      class_notes: [],
+    });
   });
 
   it("throws when a required field has the wrong type", () => {
@@ -167,15 +187,15 @@ describe("parseCaseDigestJson", () => {
     );
   });
 
-  it("accepts an issue object missing its ruling", () => {
-    const issueWithoutRuling: CaseDigestIssueInput = JSON.parse(JSON.stringify({ ratio: "Because." }));
+  it("fills missing fields on an issue object", () => {
+    const issueWithoutRuling = JSON.parse(JSON.stringify({ ratio: "Because." }));
     expect(parseCaseDigestJson(wire(buildCaseDigest({ issues: [issueWithoutRuling] }))).issues).toEqual([
-      { ratio: "Because." },
+      { issue: "", ruling: "", ratio: "Because." },
     ]);
   });
 
   it("throws when an issue field has the wrong type", () => {
-    const issueWithBadRuling: CaseDigestIssueInput = JSON.parse(JSON.stringify({ ruling: 42, ratio: "Because." }));
+    const issueWithBadRuling = JSON.parse(JSON.stringify({ ruling: 42, ratio: "Because." }));
     expect(() => parseCaseDigestJson(wire(buildCaseDigest({ issues: [issueWithBadRuling] })))).toThrow(
       "Expected issues[0].ruling to be a string.",
     );
