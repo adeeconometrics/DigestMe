@@ -595,9 +595,9 @@ export default function DigestPage({
     setPreview({ blob: message.docxBlob, fileName: message.docxFileName, downloadUrl: message.docxUrl });
   }
 
-  function handleGraphNodeSelect(node: { id: string }): void {
+  const handleGraphNodeSelect = useCallback((node: { id: string }): void => {
     setSelectedNodeId(node.id);
-  }
+  }, []);
 
   const isBusy = status === "parsing" || agentStatus === "running";
 

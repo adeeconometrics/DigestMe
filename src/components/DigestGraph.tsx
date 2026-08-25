@@ -1,4 +1,5 @@
 import forceAtlas2 from "graphology-layout-forceatlas2";
+import Graph from "graphology";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sigma from "sigma";
 import type { DocumentNode } from "../parser";
@@ -16,6 +17,94 @@ const MIN_CAMERA_RATIO = 0.08;
 const MAX_CAMERA_RATIO = 6;
 /** Fraction of the viewport kept as breathing room when framing a path. */
 const FOCUS_PADDING = 0.18;
+
+/** Node attributes as stored on the graphology graph, with seeded positions. */
+interface PositionedNode extends TreeNodePayload {
+  x: number;
+  y: number;
+}
+
+/** Raw node positions are always present (seeded by treeToGraph). */
+function asPositioned(attrs: TreeNodePayload): PositionedNode | null {
+  // SAFETY: treeToGraph seeds x/y on every node and forceAtlas2.assign
+  // rewrites them as numbers; the runtime guard confirms the shape.
+  return typeof attrs.x === "number" && typeof attrs.y === "number" ? (attrs as PositionedNode) : null;
+}
+
+/**
+ * Scale factor sigma applies so a graph extent maps isotropically onto the
+ * stage. Mirrors getCorrectionRatio from sigma's normalization module.
+ */
+function correctionRatio(viewportWidth: number, viewportHeight: number, graphWidth: number, graphHeight: number): number {
+  const viewportRatio = viewportHeight / viewportWidth;
+  const graphRatio = graphHeight / graphWidth;
+  if ((viewportRatio < 1 && graphRatio > 1) || (viewportRatio > 1 && graphRatio < 1)) return 1;
+  return Math.min(Math.max(graphRatio, 1 / graphRatio), Math.max(1 / viewportRatio, viewportRatio));
+}
+
+/**
+ * Camera state (center + ratio) that frames the given nodes on screen.
+ *
+ * The fit is computed from the graph's raw coordinates and sigma's own
+ * normalization/matrix math instead of `getNodeDisplayData`, whose values
+ * are only normalized after the renderer's first processing pass — reading
+ * them right after mount would pan the camera into raw-coordinate space.
+ */
+function cameraFitForNodes(
+  renderer: Sigma<TreeNodePayload>,
+  graph: Graph<TreeNodePayload>,
+  nodeIds: string[],
+): { x: number; y: number; ratio: number } | null {
+  const targets = nodeIds
+    .map((nodeId) => (graph.hasNode(nodeId) ? asPositioned(graph.getNodeAttributes(nodeId)) : null))
+    .filter((attrs): attrs is PositionedNode => attrs !== null);
+  if (!targets.length) return null;
+
+  // Raw extent over the whole graph (sigma's nodeExtent) and the traced subset.
+  let extentMinX = Infinity;
+  let extentMaxX = -Infinity;
+  let extentMinY = Infinity;
+  let extentMaxY = -Infinity;
+  graph.forEachNode((_node, attrs) => {
+    const positioned = asPositioned(attrs);
+    if (!positioned) return;
+    extentMinX = Math.min(extentMinX, positioned.x);
+    extentMaxX = Math.max(extentMaxX, positioned.x);
+    extentMinY = Math.min(extentMinY, positioned.y);
+    extentMaxY = Math.max(extentMaxY, positioned.y);
+  });
+
+  const minX = Math.min(...targets.map((target) => target.x));
+  const maxX = Math.max(...targets.map((target) => target.x));
+  const minY = Math.min(...targets.map((target) => target.y));
+  const maxY = Math.max(...targets.map((target) => target.y));
+
+  // Normalization (mirrors createNormalizationFunction): extent → [0, 1].
+  const extentWidth = extentMaxX - extentMinX;
+  const extentHeight = extentMaxY - extentMinY;
+  const normalizationRatio = Math.max(extentWidth, extentHeight) || 1;
+  const centerX = (extentMinX + extentMaxX) / 2;
+  const centerY = (extentMinY + extentMaxY) / 2;
+
+  const { width: viewportWidth, height: viewportHeight } = renderer.getDimensions();
+  const stage = Math.min(viewportWidth, viewportHeight) - 2 * renderer.getStagePadding();
+  const correction = correctionRatio(viewportWidth, viewportHeight, extentWidth, extentHeight);
+  const pixelsPerUnit = (stage * correction) / normalizationRatio;
+  const usableWidth = viewportWidth * (1 - FOCUS_PADDING * 2);
+  const usableHeight = viewportHeight * (1 - FOCUS_PADDING * 2);
+
+  return {
+    x: 0.5 + ((minX + maxX) / 2 - centerX) / normalizationRatio,
+    y: 0.5 + ((minY + maxY) / 2 - centerY) / normalizationRatio,
+    ratio: Math.min(
+      Math.max(
+        Math.max((maxX - minX) * pixelsPerUnit / usableWidth, (maxY - minY) * pixelsPerUnit / usableHeight),
+        MIN_CAMERA_RATIO,
+      ),
+      MAX_CAMERA_RATIO,
+    ),
+  };
+}
 
 interface HoveredNode {
   id: string;
@@ -198,7 +287,6 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       graph.setEdgeAttribute(edge, "color", active ? EDGE_TRACE.color : tracing ? EDGE_DIMMED.color : EDGE_BASE.color);
       graph.setEdgeAttribute(edge, "size", active ? EDGE_TRACE.size : EDGE_BASE.size);
       graph.setEdgeAttribute(edge, "zIndex", active ? 1 : 0);
-      graph.setEdgeAttribute(edge, "type", active ? EDGE_TRACE.type : "line");
     });
 
     graph.forEachNode((node) => {
