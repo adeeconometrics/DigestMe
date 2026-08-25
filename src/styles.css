@@ -203,6 +203,34 @@ input:focus-visible,
   align-items: flex-start;
 }
 
+.session-sub-row {
+  position: relative;
+}
+
+.session-sub-row .session-sub-item {
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.session-sub-row:hover .session-sub-item,
+.session-sub-row:focus-within .session-sub-item {
+  transform: translateX(-8px);
+}
+
+.session-sub-row .session-sub-remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  margin: 0;
+  transform: translate(8px, -50%);
+  transition: opacity 160ms ease, color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.session-sub-row:hover .session-sub-remove,
+.session-sub-row:focus-within .session-sub-remove {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
 .session-sub-copy {
   display: grid;
   min-width: 0;
