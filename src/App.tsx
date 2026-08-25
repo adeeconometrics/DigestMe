@@ -148,7 +148,6 @@ export default function App() {
       setActiveDigestTabId(documentId);
     }
     setView("digest");
-    setOpenPanel(null);
   }
 
   function beginDigestSession(files?: File[]): void {
