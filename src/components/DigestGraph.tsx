@@ -147,7 +147,8 @@ function physicsSettings(graph: Parameters<typeof forceAtlas2.inferSettings>[0])
 /**
  * Sigma.js visualization of a parsed document's context tree.
  *
- * - Hovering reveals the node reference `(section, p#)`.
+ * - Node labels are hidden until hover; hovering also reveals the node
+ *   reference `(section, p#)`.
  * - Edges stay thin and opaque; a trace request lights up the
  *   root-to-section paths in signal red with directional arrows while
  *   the rest recede, then the camera recenters on the traced region.
@@ -182,7 +183,7 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       labelGridCellSize: 90,
       labelRenderedSizeThreshold: 8,
       defaultEdgeType: "arrow",
-      renderLabels: true,
+      renderLabels: false,
       stagePadding: 60,
     });
     sigmaRef.current = renderer;
