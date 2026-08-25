@@ -42,6 +42,7 @@ from .tools import DocumentContext
 
 DIGEST_PROMPT = "Create a complete case digest from the supplied source document."
 StreamEmitter = Callable[[str], object]
+RequestStreamEmitter = Callable[[int, str], object]
 _REQUEST_PAYLOADS: dict[int, str] = {}
 
 _AGENT_RUN_ERRORS = (
@@ -435,7 +436,16 @@ async def run_request(payload: str, request_id: int) -> str:
         _REQUEST_PAYLOADS.pop(request_id, None)
 
 
-async def run_request_stream(payload: str, request_id: int, emit: StreamEmitter) -> str:
+def _bind_stream_request_id(emit: RequestStreamEmitter, request_id: int) -> StreamEmitter:
+    """Bind the active request id so the JS dispatcher can route each event."""
+
+    def emit_with_request(payload: str) -> object:
+        return emit(request_id, payload)
+
+    return emit_with_request
+
+
+async def run_request_stream(payload: str, request_id: int, emit: RequestStreamEmitter) -> str:
     """Dispatch a chat request and emit JSON events as the agent executes."""
     _REQUEST_PAYLOADS[request_id] = payload
     try:
@@ -452,7 +462,7 @@ async def run_request_stream(payload: str, request_id: int, emit: StreamEmitter)
             _required_string(request, "question"),
             api_key=_required_string(request, "api_key"),
             model_name=_required_string(request, "model_name"),
-            emit=emit,
+            emit=_bind_stream_request_id(emit, request_id),
         )
         return result.model_dump_json()
     finally:

@@ -316,8 +316,10 @@ let activeRequests = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
 function dispatchStream(requestId: number, event: unknown): void {
-  const eventJson = isWireString(event) ? event : String(event);
-  const parsed: unknown = JSON.parse(eventJson);
+  if (!isWireString(event)) {
+    throw new Error("emit_stream must be invoked with a JSON string payload.");
+  }
+  const parsed: unknown = JSON.parse(event);
   if (!isWireValue(parsed)) throw new Error("The agent stream returned an invalid event.");
   requestRegistry.dispatch(requestId, parsed);
 }
