@@ -170,7 +170,7 @@ def test_bind_stream_request_id_forwards_request_id_and_payload() -> None:
     """The JS dispatcher routes by request id, so the emitter must carry it."""
     calls: list[tuple[int, str]] = []
 
-    def emit(request_id: int, payload: str) -> object:
+    def emit(request_id: int, payload: str) -> None:
         calls.append((request_id, payload))
 
     payload = '{"type": "start", "model": "test/chat", "started_at": 1}'
