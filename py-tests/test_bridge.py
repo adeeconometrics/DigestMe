@@ -102,6 +102,47 @@ def test_run_case_digest_preserves_structured_output_and_references(
     assert result.references
 
 
+def test_run_case_digest_normalizes_sparse_structured_output(document_tree: DocumentNode) -> None:
+    agent = build_agent(TestModel(custom_output_args={}, model_name="test-digest"))
+
+    result = asyncio.run(
+        run_case_digest(
+            document_tree,
+            api_key="unused-in-test",
+            model_name="test/digest",
+            agent=agent,
+        )
+    )
+
+    expected_digest = {
+        "case_title": "",
+        "petitioner": "",
+        "respondent": "",
+        "topic_subtopic": "",
+        "subject": "",
+        "ponente": "",
+        "gr_no_date": "",
+        "full_text": "",
+        "summary": "",
+        "doctrine": "",
+        "provisions": "",
+        "facts": {
+            "petition": [],
+            "petitioner_version": [],
+            "respondent_version": [],
+        },
+        "petitioners_arguments": [],
+        "respondents_arguments": [],
+        "procedural_posture": [],
+        "issues": [],
+        "supreme_court_ruling": "",
+        "class_notes": [],
+    }
+
+    assert result.digest.model_dump() == expected_digest
+    assert json.loads(result.model_dump_json())["digest"] == expected_digest
+
+
 def test_run_chat_rejects_empty_questions(document_tree: DocumentNode) -> None:
     agent = build_chat_agent(TestModel(custom_output_text="unused"))
 
