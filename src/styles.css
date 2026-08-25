@@ -1964,7 +1964,20 @@ input:focus-visible,
 }
 
 .docx-preview-render {
+  width: 100%;
   min-height: 100%;
+}
+
+.docx-preview-render .digest-doc-wrapper {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 16px 12px 0;
+  background: #d7dbd2;
+}
+
+.docx-preview-render .digest-doc-wrapper > section.digest-doc {
+  flex: 0 0 auto;
+  margin-bottom: 18px;
 }
 
 .docx-preview-status {
