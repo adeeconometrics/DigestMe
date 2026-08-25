@@ -14,7 +14,14 @@ from pydantic_ai.usage import RequestUsage
 from pydantic_core import ValidationError
 
 from engine.agent import build_agent, build_chat_agent
-from engine.bridge import AgentRunError, _last_reply_diagnostic, _translate_agent_error, run_case_digest, run_chat, run_chat_stream
+from engine.bridge import (
+    AgentRunError,
+    _last_reply_diagnostic,
+    _translate_agent_error,
+    run_case_digest,
+    run_chat,
+    run_chat_stream,
+)
 from engine.document import DocumentNode
 
 
@@ -182,7 +189,9 @@ def test_run_case_digest_translates_invalid_output_retries(document_tree: Docume
 
 
 def test_translate_tool_retry_error_is_user_facing() -> None:
-    error = _translate_agent_error(ToolRetryError(RetryPromptPart(content="Tool 'global_search' call failed validation")))
+    error = _translate_agent_error(
+        ToolRetryError(RetryPromptPart(content="Tool 'global_search' call failed validation"))
+    )
 
     assert isinstance(error, AgentRunError)
     assert "repeated invalid model output" in str(error)

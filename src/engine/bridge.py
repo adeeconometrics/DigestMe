@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from time import perf_counter, time_ns
 from typing import Any
 
-from pydantic_ai import Agent, capture_run_messages
+from pydantic_ai import Agent, AgentRunEvents, AgentRunResult, capture_run_messages
 from pydantic_ai.exceptions import (
     ContentFilterError,
     ModelAPIError,
@@ -264,6 +265,21 @@ def _emit_agent_event(emit: StreamEmitter, event: object) -> None:  # pylint: di
         )
 
 
+async def _run_agent(
+    factory: Callable[[], Awaitable[AgentRunResult[Any]]],
+) -> tuple[AgentRunResult[Any], int]:
+    """Run one agent call, capturing messages and elapsed time."""
+    started_at = perf_counter()
+    run_messages: list[ModelMessage] = []
+    try:
+        with capture_run_messages() as captured_messages:
+            run_messages = captured_messages
+            result = await factory()
+    except _AGENT_RUN_ERRORS as error:
+        raise _translate_agent_error(error, run_messages) from error
+    return result, _elapsed_ms(started_at)
+
+
 async def run_case_digest(
     root: DocumentNode | Mapping[str, object],
     *,
@@ -272,21 +288,14 @@ async def run_case_digest(
     agent: Agent[DocumentContext, CaseDigest] | None = None,
 ) -> CaseDigestResult:
     """Run the structured case-digest agent and retain its source references."""
-    started_at = perf_counter()
     context = _context(root)
     runner = agent or build_openrouter_agent(api_key=api_key, model_name=model_name)
-    run_messages: list[ModelMessage] = []
-    try:
-        with capture_run_messages() as captured_messages:
-            run_messages = captured_messages
-            result = await runner.run(DIGEST_PROMPT, deps=context)
-    except _AGENT_RUN_ERRORS as error:
-        raise _translate_agent_error(error, run_messages) from error
+    result, elapsed_ms = await _run_agent(lambda: runner.run(DIGEST_PROMPT, deps=context))
     return CaseDigestResult(
         digest=result.output,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=_elapsed_ms(started_at),
+        elapsed_ms=elapsed_ms,
     )
 
 
@@ -304,16 +313,9 @@ async def run_chat(
     if not normalized_question:
         raise ValueError("Question must not be empty")
 
-    started_at = perf_counter()
     context = _context(root)
     runner = agent or build_chat_openrouter_agent(api_key=api_key, model_name=model_name)
-    run_messages: list[ModelMessage] = []
-    try:
-        with capture_run_messages() as captured_messages:
-            run_messages = captured_messages
-            result = await runner.run(normalized_question, deps=context)
-    except _AGENT_RUN_ERRORS as error:
-        raise _translate_agent_error(error, run_messages) from error
+    result, elapsed_ms = await _run_agent(lambda: runner.run(normalized_question, deps=context))
     markdown = result.output.strip()
     if not markdown:
         raise ValueError("The agent returned an empty answer")
@@ -322,10 +324,36 @@ async def run_chat(
         markdown=markdown,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=max(_elapsed_ms(started_at), ended_at_ms - started_at_ms),
+        elapsed_ms=max(elapsed_ms, ended_at_ms - started_at_ms),
         started_at=started_at_ms,
         ended_at=ended_at_ms,
     )
+
+
+async def _run_agent_stream(
+    factory: Callable[[], AbstractAsyncContextManager[AgentRunEvents[Any]]],
+    emit: StreamEmitter,
+) -> tuple[str, int]:
+    """Run one streaming agent call, emitting deltas and capturing the final text."""
+    started_at = perf_counter()
+    run_messages: list[ModelMessage] = []
+    markdown: str | None = None
+    try:
+        with capture_run_messages() as captured_messages:
+            run_messages = captured_messages
+            async with factory() as events:
+                async for event in events:
+                    if isinstance(event, AgentRunResultEvent):
+                        if not isinstance(event.result.output, str):
+                            raise TypeError("The chat agent returned a non-text answer")
+                        markdown = event.result.output.strip()
+                    else:
+                        _emit_agent_event(emit, event)
+    except _AGENT_RUN_ERRORS as error:
+        raise _translate_agent_error(error, run_messages) from error
+    if markdown is None:
+        raise ValueError("The agent returned an empty answer")
+    return markdown, _elapsed_ms(started_at)
 
 
 async def run_chat_stream(  # pylint: disable=too-many-arguments
@@ -342,39 +370,23 @@ async def run_chat_stream(  # pylint: disable=too-many-arguments
     if not normalized_question:
         raise ValueError("Question must not be empty")
 
-    started_at = perf_counter()
     started_at_ms = _epoch_ms()
     context = _context(root)
     runner = agent or build_chat_openrouter_agent(api_key=api_key, model_name=model_name)
     _emit_stream_event(emit, {"type": "start", "model": model_name, "started_at": started_at_ms})
 
-    markdown: str | None = None
-    run_messages: list[ModelMessage] = []
-    try:
-        with capture_run_messages() as captured_messages:
-            run_messages = captured_messages
-            async with runner.run_stream_events(normalized_question, deps=context) as events:
-                async for event in events:
-                    if isinstance(event, AgentRunResultEvent):
-                        if not isinstance(event.result.output, str):
-                            raise TypeError("The chat agent returned a non-text answer")
-                        markdown = event.result.output.strip()
-                    else:
-                        _emit_agent_event(emit, event)
-    except _AGENT_RUN_ERRORS as error:
-        raise _translate_agent_error(error, run_messages) from error
-
-    if not markdown:
-        raise ValueError("The agent returned an empty answer")
-
-    ended_at = _epoch_ms()
+    markdown, elapsed_ms = await _run_agent_stream(
+        lambda: runner.run_stream_events(normalized_question, deps=context),
+        emit,
+    )
+    ended_at_ms = _epoch_ms()
     return ChatAnswer(
         markdown=markdown,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=max(_elapsed_ms(started_at), ended_at - started_at_ms),
+        elapsed_ms=max(elapsed_ms, ended_at_ms - started_at_ms),
         started_at=started_at_ms,
-        ended_at=ended_at,
+        ended_at=ended_at_ms,
     )
 
 
@@ -408,9 +420,7 @@ async def run_request(payload: str, request_id: int) -> str:
         model_name = _required_string(request, "model_name")
 
         if command == "digest":
-            return (
-                await run_case_digest(root, api_key=api_key, model_name=model_name)
-            ).model_dump_json()
+            return (await run_case_digest(root, api_key=api_key, model_name=model_name)).model_dump_json()
         if command == "chat":
             result = await run_chat(
                 root,
