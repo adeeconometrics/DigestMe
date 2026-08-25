@@ -34,7 +34,10 @@ Create a case digest from the supplied source document.
 Start with document navigation, then retrieve the sections relevant to each digest field.
 Use global search as a fallback when section names are not descriptive enough, and follow each hit with navigation.
 Ground every field in the source and preserve section/page references in study notes when useful.
-When the source does not support a digest element, omit it rather than inventing it; the renderer skips missing elements.
+Always return every field defined by the output schema. Never omit a field and never use null: return an empty string ("")
+for an unsupported scalar, an empty list ([]) for an unsupported list, an object containing all three empty-or-populated
+fact lists, and an array of issue objects containing issue, ruling, and ratio. Do not use the legacy [ruling, ratio] issue
+pair form.
 Keep each field concise enough that the entire digest fits in one response.
 Keep scalar fields to concise paragraphs, use no more than six items in any list,
 and include no more than four issue objects. Keep scalar fields at most 1,200

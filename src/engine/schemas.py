@@ -1,41 +1,75 @@
 """Structured case-digest output models shared with the DOCX renderer."""
 
+from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .document import DocumentReference
+
+
+def _normalize_missing_fields(
+    value: Any,
+    *,
+    scalar_fields: tuple[str, ...] = (),
+    list_fields: tuple[str, ...] = (),
+    object_fields: tuple[str, ...] = (),
+) -> Any:
+    """Fill omitted or null sections without coercing malformed values."""
+    if not isinstance(value, Mapping):
+        return value
+
+    normalized = dict(value)
+    for field_name in scalar_fields:
+        if normalized.get(field_name) is None:
+            normalized[field_name] = ""
+    for field_name in list_fields:
+        if normalized.get(field_name) is None:
+            normalized[field_name] = []
+    for field_name in object_fields:
+        if normalized.get(field_name) is None:
+            normalized[field_name] = {}
+    return normalized
 
 
 class CaseDigestFacts(BaseModel):
     """Facts grouped according to the case-digest FACTS section.
 
-    The source may not identify every fact category, so absent elements are
-    accepted while present elements keep their declared shape.
+    Every category is present in the serialized contract. An empty list means
+    the source does not support that category.
     """
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
-    petition: list[str] | None = Field(
-        default=None,
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_fields(cls, value: Any) -> Any:
+        """Represent unsupported fact categories as empty lists."""
+        return _normalize_missing_fields(
+            value,
+            list_fields=("petition", "petitioner_version", "respondent_version"),
+        )
+
+    petition: list[str] = Field(
         description=(
             "A chronological list explaining why the case was initiated and the material events "
             "leading to the petition. "
-            "Each item should state one concrete fact grounded in the source document."
+            "Each item should state one concrete fact grounded in the source document. "
+            "Return an empty list if the source does not state petition facts."
         )
     )
-    petitioner_version: list[str] | None = Field(
-        default=None,
+    petitioner_version: list[str] = Field(
         description=(
             "The petitioner's account of disputed facts, if the source presents one. "
-            "Use concise, separately stated factual points."
+            "Use concise, separately stated factual points. "
+            "Return an empty list if the source does not state this version."
         ),
     )
-    respondent_version: list[str] | None = Field(
-        default=None,
+    respondent_version: list[str] = Field(
         description=(
             "The respondent's account of disputed facts, if the source presents one. "
-            "Use concise, separately stated factual points."
+            "Use concise, separately stated factual points. "
+            "Return an empty list if the source does not state this version."
         ),
     )
 
@@ -43,31 +77,36 @@ class CaseDigestFacts(BaseModel):
 class CaseDigestIssue(BaseModel):
     """One issue together with the Supreme Court's answer and reasoning.
 
-    The model may omit an issue element when the source does not state it
-    separately, but present values must still have the declared shape.
+    Every key is present in the serialized contract. An empty string means the
+    source does not state that element separately.
     """
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
-    issue: str | None = Field(
-        default=None,
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_fields(cls, value: Any) -> Any:
+        """Represent unsupported issue details as empty strings."""
+        return _normalize_missing_fields(value, scalar_fields=("issue", "ruling", "ratio"))
+
+    issue: str = Field(
         description=(
             "The legal question presented, preferably phrased as a focused issue or WON question. "
-            "Omit it only when the source does not identify the issue separately."
+            "Return an empty string when the source does not identify the issue separately."
         ),
     )
-    ruling: str | None = Field(
-        default=None,
+    ruling: str = Field(
         description=(
             "The direct disposition of this issue, such as YES, NO, GRANTED, or DENIED. "
-            "Keep the answer concise and faithful to the Court's holding."
+            "Keep the answer concise and faithful to the Court's holding. "
+            "Return an empty string only when the source does not state a ruling."
         )
     )
-    ratio: str | None = Field(
-        default=None,
+    ratio: str = Field(
         description=(
             "The legal reasoning supporting the ruling on this issue. "
-            "Explain the controlling rule and how the Court applied it to the material facts."
+            "Explain the controlling rule and how the Court applied it to the material facts. "
+            "Return an empty string only when the source does not state the reasoning."
         )
     )
 
@@ -75,157 +114,173 @@ class CaseDigestIssue(BaseModel):
 class CaseDigest(BaseModel):
     """Complete structured output accepted by ``caseDigestDocx.ts``.
 
-    A source may not support every digest section. Optional elements are
-    rendered as ``Not stated`` downstream, while present values remain strict.
-    Unknown model keys are ignored so they cannot reach the renderer.
+    Every section is present in the serialized contract. Empty strings and
+    empty lists represent sections unsupported by the source and are rendered
+    as ``Not stated`` downstream. Unknown model keys are ignored so they cannot
+    reach the renderer.
     """
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
-    case_title: str | None = Field(
-        default=None,
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_fields(cls, value: Any) -> Any:
+        """Fill unsupported top-level sections without weakening type checks."""
+        return _normalize_missing_fields(
+            value,
+            scalar_fields=(
+                "case_title",
+                "petitioner",
+                "respondent",
+                "topic_subtopic",
+                "subject",
+                "ponente",
+                "gr_no_date",
+                "full_text",
+                "summary",
+                "doctrine",
+                "provisions",
+                "supreme_court_ruling",
+            ),
+            list_fields=(
+                "petitioners_arguments",
+                "respondents_arguments",
+                "procedural_posture",
+                "issues",
+                "class_notes",
+            ),
+            object_fields=("facts",),
+        )
+
+    case_title: str = Field(
         description=(
             "The complete official case title, including the parties and the v. separator. "
-            "Use the title stated in the source document."
+            "Use the title stated in the source document. "
+            "Return an empty string if the source does not state the title."
         )
     )
-    petitioner: str | None = Field(
-        default=None,
+    petitioner: str = Field(
         description=(
             "The person, entity, or group that brought the petition before the Supreme Court. "
-            "Preserve the source's proper name and relevant designation."
+            "Preserve the source's proper name and relevant designation. "
+            "Return an empty string if the source does not identify the petitioner."
         )
     )
-    respondent: str | None = Field(
-        default=None,
+    respondent: str = Field(
         description=(
             "The person, entity, or group opposing the petition. "
-            "Preserve the source's proper name and relevant designation."
+            "Preserve the source's proper name and relevant designation. "
+            "Return an empty string if the source does not identify the respondent."
         )
     )
-    topic_subtopic: str | None = Field(
-        default=None,
+    topic_subtopic: str = Field(
         description=(
             "The legal topic and narrower subtopic that classify the case. "
-            "State the classification succinctly, using the source's terminology where available."
+            "State the classification succinctly, using the source's terminology where available. "
+            "Return an empty string if the source does not support a classification."
         )
     )
-    subject: str | None = Field(
-        default=None,
+    subject: str = Field(
         description=(
             "The class, course, or subject area for which the digest is prepared. "
-            "Use the source-provided subject or the most specific supported legal subject."
+            "Use the source-provided subject or the most specific supported legal subject. "
+            "Return an empty string if the source does not state a subject."
         )
     )
-    ponente: str | None = Field(
-        default=None,
+    ponente: str = Field(
         description=(
             "The name and designation of the Supreme Court justice who wrote the decision. "
-            "Do not infer a ponente when the source does not identify one."
+            "Do not infer a ponente when the source does not identify one. "
+            "Return an empty string when it is not stated."
         )
     )
-    gr_no_date: str | None = Field(
-        default=None,
+    gr_no_date: str = Field(
         description=(
             "The case number and decision date, normally formatted as the G.R. number followed by "
             "a separator and date. "
-            "Copy both details from the source document."
+            "Copy both details from the source document. "
+            "Return an empty string if either detail is not stated."
         )
     )
-    full_text: str | None = Field(
-        default=None,
+    full_text: str = Field(
         description=(
             "A URL or user-facing reference to the complete decision text. "
-            "Use a source-provided link when available rather than inventing one."
+            "Use a source-provided link when available rather than inventing one. "
+            "Return an empty string if no reference is stated."
         )
     )
-    summary: str | None = Field(
-        default=None,
+    summary: str = Field(
         description=(
             "A concise narrative summary of the material facts, procedural setting, issue, and outcome. "
-            "It should let a reader understand the case without reading the full decision."
+            "It should let a reader understand the case without reading the full decision. "
+            "Return an empty string if the source does not support a summary."
         )
     )
-    doctrine: str | None = Field(
-        default=None,
+    doctrine: str = Field(
         description=(
             "The general legal rule or principle established or applied by the Court. "
-            "State it as a reusable proposition, supported by the decision rather than by speculation."
+            "State it as a reusable proposition, supported by the decision rather than by speculation. "
+            "Return an empty string if no doctrine is stated."
         )
     )
-    provisions: str | None = Field(
-        default=None,
+    provisions: str = Field(
         description=(
             "The constitutional provisions, statutes, rules, regulations, or other legal authorities "
             "relevant to the ruling. "
-            "Include article or section identifiers and brief text or explanation when the source supplies them."
+            "Include article or section identifiers and brief text or explanation when the source supplies them. "
+            "Return an empty string if no relevant provision is stated."
         )
     )
-    facts: CaseDigestFacts | None = Field(
-        default=None,
+    facts: CaseDigestFacts = Field(
         description=(
             "The material factual narrative, including the petitioner's version and any opposing "
             "versions stated in the source. "
-            "Organize it into concrete points suitable for the digest's FACTS section."
+            "Organize it into concrete points suitable for the digest's FACTS section. "
+            "Always return all three fact lists, using empty lists for unsupported categories."
         )
     )
-    petitioners_arguments: list[str] | None = Field(
-        default=None,
+    petitioners_arguments: list[str] = Field(
         description=(
             "The petitioner's principal legal and factual arguments. "
-            "Each list item should express one distinct argument grounded in the petition or the decision."
+            "Each list item should express one distinct argument grounded in the petition or the decision. "
+            "Return an empty list if the source does not state these arguments."
         )
     )
-    respondents_arguments: list[str] | None = Field(
-        default=None,
+    respondents_arguments: list[str] = Field(
         description=(
             "The respondent's principal legal and factual arguments. "
-            "Each list item should express one distinct argument grounded in the response or the decision."
+            "Each list item should express one distinct argument grounded in the response or the decision. "
+            "Return an empty list if the source does not state these arguments."
         )
     )
-    procedural_posture: list[str] | None = Field(
-        default=None,
+    procedural_posture: list[str] = Field(
         description=(
             "The material procedural steps and rulings from the initial action through the Supreme Court. "
-            "List them in chronological order and identify the deciding body for each step."
+            "List them in chronological order and identify the deciding body for each step. "
+            "Return an empty list if the source does not establish the procedural sequence."
         )
     )
-    issues: list[CaseDigestIssue] | None = Field(
-        default=None,
+    issues: list[CaseDigestIssue] = Field(
         description=(
             "The significant legal issues resolved by the Supreme Court, each with its ruling and ratio. "
-            "Include a separate item for each independently answered issue."
+            "Include a separate item for each independently answered issue. "
+            "Return an empty list when the source does not identify separate issues."
         )
     )
-    supreme_court_ruling: str | None = Field(
-        default=None,
+    supreme_court_ruling: str = Field(
         description=(
             "The Supreme Court's final disposition and operative orders. "
-            "State whether the petition or appeal was granted or denied and identify the judgment or relief ordered."
+            "State whether the petition or appeal was granted or denied and identify the judgment or relief ordered. "
+            "Return an empty string if the final disposition is not stated."
         )
     )
-    class_notes: list[str] | None = Field(
-        default=None,
+    class_notes: list[str] = Field(
         description=(
             "Short study notes highlighting the most useful takeaways from the case. "
-            "Each item should be a distinct, source-grounded rule, connection, or exam-relevant observation."
+            "Each item should be a distinct, source-grounded rule, connection, or exam-relevant observation. "
+            "Return an empty list if no study notes are supported."
         )
     )
-
-    @field_validator("issues", mode="before")
-    @classmethod
-    def normalize_issue_pairs(cls, value: Any) -> Any:
-        """Normalize the legacy ``[ruling, ratio]`` issue shape accepted by TypeScript."""
-        if not isinstance(value, list):
-            return value
-
-        normalized: list[Any] = []
-        for issue in value:
-            if isinstance(issue, (list, tuple)) and len(issue) == 2:
-                normalized.append({"ruling": issue[0], "ratio": issue[1]})
-            else:
-                normalized.append(issue)
-        return normalized
 
 
 class ChatAnswer(BaseModel):
