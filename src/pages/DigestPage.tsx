@@ -637,25 +637,6 @@ export default function DigestPage({
       onDrop={handleDrop}
     >
       <section className="session-chat">
-        <header className="session-header">
-          <div className="session-title">
-            <span className="session-mark">
-              {agentStatus === "running" ? (
-                <span aria-label="Digest agent connected and running" className="agent-spin session-mark-spin" role="status" />
-              ) : (
-                <Icon name="spark" size={16} />
-              )}
-            </span>
-            <div>
-              <strong>{selected ? selected.fileName : "Case digest session"}</strong>
-              <small>{selected ? `${selected.metrics.pageCount} pages · parsed on-device` : "attach a case file to begin"}</small>
-            </div>
-          </div>
-          {selected && (
-            <span className="session-badge"><Icon name="check" size={12} /> local</span>
-          )}
-        </header>
-
         <div className="chat-log" ref={logRef}>
           {messages.map((message) => (
             <ChatBubble

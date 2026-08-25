@@ -3014,62 +3014,6 @@ input:focus-visible,
   background: var(--paper-bright);
 }
 
-.session-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.session-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.session-mark {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 13px;
-  background: var(--lime);
-  color: var(--ink);
-  flex-shrink: 0;
-}
-
-.session-title strong {
-  display: block;
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-title small {
-  color: var(--ink-faint);
-  font-size: 11.5px;
-}
-
-.session-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border: 1px solid rgba(184, 216, 86, 0.55);
-  border-radius: 999px;
-  background: rgba(218, 250, 113, 0.28);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  white-space: nowrap;
-}
-
 .chat-log {
   display: flex;
   flex: 1;
@@ -3645,13 +3589,13 @@ input:focus-visible,
 
 /* Orbiting twin-dot spinner that replaces session icons while the agent is connected and running. */
 .agent-spin {
-  --spin-size: 15px;
+  --spin-size: 17px;
   width: var(--spin-size);
   aspect-ratio: 1;
   border-radius: 50%;
-  background: var(--lime-dark);
+  background: #000;
   display: grid;
-  animation: agent-spin-revolve 2s linear infinite;
+  animation: l22-0 2s infinite linear;
   flex: 0 0 auto;
 }
 
@@ -3663,7 +3607,7 @@ input:focus-visible,
   border-radius: 50%;
   background: inherit;
   transform: rotate(0deg) translate(150%);
-  animation: agent-spin-orbit 1s infinite;
+  animation: l22 1s infinite;
 }
 
 .agent-spin::after {
@@ -3674,19 +3618,15 @@ input:focus-visible,
   --spin-size: 12px;
 }
 
-.session-mark-spin {
-  --spin-size: 15px;
-}
-
 .chat-avatar-spin {
   --spin-size: 15px;
 }
 
-@keyframes agent-spin-revolve {
+@keyframes l22-0 {
   100% { transform: rotate(1turn); }
 }
 
-@keyframes agent-spin-orbit {
+@keyframes l22 {
   100% { transform: rotate(1turn) translate(150%); }
 }
 
