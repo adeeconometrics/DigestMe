@@ -4,7 +4,14 @@ import pytest
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from engine.agent import _browser_safe_headers, build_openrouter_agent
+from engine.agent import (
+    _browser_safe_headers,
+    AGENT_MAX_TOKENS,
+    CHAT_MAX_TOKENS,
+    build_agent,
+    build_chat_agent,
+    build_openrouter_agent,
+)
 
 
 def test_build_openrouter_agent_uses_explicit_model_and_key() -> None:
@@ -15,6 +22,16 @@ def test_build_openrouter_agent_uses_explicit_model_and_key() -> None:
     provider = agent.model.provider
     assert isinstance(provider, OpenRouterProvider)
     assert provider.client.api_key == "test-key"
+
+
+def test_agents_request_separate_output_budgets() -> None:
+    digest_agent = build_agent()
+    chat_agent = build_chat_agent()
+
+    assert isinstance(digest_agent.model_settings, dict)
+    assert digest_agent.model_settings["max_tokens"] == AGENT_MAX_TOKENS
+    assert isinstance(chat_agent.model_settings, dict)
+    assert chat_agent.model_settings["max_tokens"] == CHAT_MAX_TOKENS
 
 
 @pytest.mark.parametrize(
