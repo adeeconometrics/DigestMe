@@ -224,6 +224,35 @@ input:focus-visible,
   font-size: 8px;
 }
 
+.session-sub-mark {
+  position: relative;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: visible !important;
+}
+
+.session-sub-complete,
+.session-sub-failed {
+  position: absolute;
+  right: -3px;
+  bottom: -1px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--paper-bright);
+  border-radius: 50%;
+}
+
+.session-sub-complete {
+  background: #5d9a68;
+}
+
+.session-sub-failed {
+  background: var(--peach);
+}
+
 .session-history-toggle {
   margin-top: 3px;
   border-top: 1px solid var(--line);
@@ -313,6 +342,13 @@ input:focus-visible,
   border-color: var(--lime-dark);
   background: rgba(218, 250, 113, 0.18);
   color: var(--ink);
+}
+
+.sub-new.is-digest-ready {
+  border-color: var(--lime-dark);
+  background: rgba(218, 250, 113, 0.38);
+  color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(184, 216, 86, 0.2);
 }
 
 .sub-empty {
@@ -1928,7 +1964,20 @@ input:focus-visible,
 }
 
 .docx-preview-render {
+  width: 100%;
   min-height: 100%;
+}
+
+.docx-preview-render .digest-doc-wrapper {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 16px 12px 0;
+  background: #d7dbd2;
+}
+
+.docx-preview-render .digest-doc-wrapper > section.digest-doc {
+  flex: 0 0 auto;
+  margin-bottom: 18px;
 }
 
 .docx-preview-status {
@@ -2871,6 +2920,11 @@ input:focus-visible,
   animation: agent-pulse 900ms ease-in-out infinite alternate;
 }
 
+.digest-tab-status.is-complete {
+  background: #5d9a68;
+  box-shadow: 0 0 0 3px rgba(93, 154, 104, 0.13);
+}
+
 .digest-tab-status.is-failed {
   background: var(--peach);
   box-shadow: 0 0 0 3px rgba(255, 154, 128, 0.16);
@@ -2971,62 +3025,6 @@ input:focus-visible,
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--paper-bright);
-}
-
-.session-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line);
-}
-
-.session-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.session-mark {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 13px;
-  background: var(--lime);
-  color: var(--ink);
-  flex-shrink: 0;
-}
-
-.session-title strong {
-  display: block;
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-title small {
-  color: var(--ink-faint);
-  font-size: 11.5px;
-}
-
-.session-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border: 1px solid rgba(184, 216, 86, 0.55);
-  border-radius: 999px;
-  background: rgba(218, 250, 113, 0.28);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  white-space: nowrap;
 }
 
 .chat-log {
@@ -3588,6 +3586,50 @@ input:focus-visible,
   animation: none;
 }
 
+.agent-progress.is-queued {
+  color: var(--ink-soft);
+}
+
+.loader {
+  --loader-color: var(--ink);
+  --c: var(--loader-color) 90%, #0000;
+  display: block;
+  width: 30px;
+  aspect-ratio: 4;
+  flex: 0 0 auto;
+  background:
+    radial-gradient(circle closest-side at left 6px top 50%, var(--c)),
+    radial-gradient(circle closest-side, var(--c)),
+    radial-gradient(circle closest-side at right 6px top 50%, var(--c));
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  animation: l4 1s infinite alternate;
+}
+
+.agent-queue-loader {
+  width: 30px;
+  --loader-color: var(--ink-soft);
+}
+
+.digest-tab-loader {
+  width: 20px;
+  --loader-color: var(--lime-dark);
+}
+
+.session-sub-loader {
+  width: 15px;
+  --loader-color: var(--ink-soft);
+}
+
+.chat-avatar-loader {
+  width: 20px;
+  --loader-color: var(--ink);
+}
+
+@keyframes l4 {
+  to { width: 18px; aspect-ratio: 1; }
+}
+
 .agent-progress-dot {
   width: 6px;
   height: 6px;
@@ -3600,6 +3642,49 @@ input:focus-visible,
 @keyframes agent-pulse {
   from { opacity: 0.4; transform: scale(0.8); }
   to { opacity: 1; transform: scale(1.1); }
+}
+
+/* Orbiting twin-dot spinner that replaces session icons while the agent is connected and running. */
+.agent-spin {
+  --spin-size: 17px;
+  width: var(--spin-size);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #000;
+  display: grid;
+  animation: l22-0 2s infinite linear;
+  flex: 0 0 auto;
+}
+
+.agent-spin::before,
+.agent-spin::after {
+  content: "";
+  grid-area: 1 / 1;
+  margin: 15%;
+  border-radius: 50%;
+  background: inherit;
+  transform: rotate(0deg) translate(150%);
+  animation: l22 1s infinite;
+}
+
+.agent-spin::after {
+  animation-delay: -0.5s;
+}
+
+.session-sub-spin {
+  --spin-size: 12px;
+}
+
+.chat-avatar-spin {
+  --spin-size: 15px;
+}
+
+@keyframes l22-0 {
+  100% { transform: rotate(1turn); }
+}
+
+@keyframes l22 {
+  100% { transform: rotate(1turn) translate(150%); }
 }
 
 @keyframes stream-caret {

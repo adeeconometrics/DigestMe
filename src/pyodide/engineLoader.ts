@@ -58,14 +58,18 @@ interface PendingRequest {
   resolve: (value: WireValue) => void;
   reject: (reason: Error) => void;
   onStream?: (event: WireValue) => void;
+  onRequestState?: (state: AgentRequestState) => void;
   worker: Worker;
   /** Whether the worker acknowledged execution; queued requests ride the boot watchdog instead. */
   started: boolean;
   timer?: ReturnType<typeof setTimeout>;
 }
 
+export type AgentRequestState = "queued" | "running";
+
 export interface AgentRequestOptions {
   onRequestId?: (requestId: number) => void;
+  onRequestState?: (state: AgentRequestState) => void;
 }
 
 /** Kill a request only after this much worker silence — not total runtime. */
@@ -152,6 +156,7 @@ function createWorker(): Worker {
       if (!pending) return;
       pending.started = true;
       armRequestTimer(message.requestId, pending);
+      pending.onRequestState?.("running");
       return;
     }
 
@@ -197,9 +202,17 @@ function requestAgent(
 
   return new Promise((resolve, reject) => {
     const { credentials, ...command } = request;
-    const pending: PendingRequest = { resolve, reject, onStream, worker: activeWorker, started: false };
+    const pending: PendingRequest = {
+      resolve,
+      reject,
+      onStream,
+      onRequestState: options?.onRequestState,
+      worker: activeWorker,
+      started: false,
+    };
     pendingRequests.set(requestId, pending);
     try {
+      options?.onRequestState?.("queued");
       activeWorker.postMessage({
         requestId,
         ...command,

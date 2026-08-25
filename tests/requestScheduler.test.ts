@@ -26,6 +26,32 @@ describe("engine request scheduler", () => {
     resolvers.get(3)?.();
   });
 
+  it("keeps agent requests strictly sequential with a single slot", async () => {
+    const started: number[] = [];
+    const resolvers = new Map<number, () => void>();
+    const scheduler = createRequestScheduler<number>(1, async (value) => {
+      started.push(value);
+      await new Promise<void>((resolve) => resolvers.set(value, resolve));
+    });
+
+    scheduler.enqueue({ requestId: 1, value: 1 });
+    scheduler.enqueue({ requestId: 2, value: 2 });
+    scheduler.enqueue({ requestId: 3, value: 3 });
+
+    expect(started).toEqual([1]);
+    expect(resolvers.has(2)).toBe(false);
+    expect(resolvers.has(3)).toBe(false);
+
+    resolvers.get(1)?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual([1, 2]);
+
+    resolvers.get(2)?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual([1, 2, 3]);
+    resolvers.get(3)?.();
+  });
+
   it("removes a queued request without consuming a slot", async () => {
     const started: number[] = [];
     const resolvers = new Map<number, () => void>();

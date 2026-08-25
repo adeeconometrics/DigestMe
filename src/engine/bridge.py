@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from time import perf_counter, time_ns
 from typing import Any
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, AgentRunEvents, AgentRunResult, capture_run_messages
+from pydantic_ai.exceptions import (
+    ContentFilterError,
+    ModelAPIError,
+    ToolRetryError,
+    UnexpectedModelBehavior,
+    UsageLimitExceeded,
+)
 from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
     PartDeltaEvent,
     PartEndEvent,
     PartStartEvent,
@@ -22,6 +32,7 @@ from pydantic_ai.messages import (
     ToolResultEvent,
 )
 from pydantic_ai.run import AgentRunResultEvent
+from pydantic_core import ValidationError
 
 from .agent import build_chat_openrouter_agent, build_openrouter_agent
 from .document import DocumentNode
@@ -32,6 +43,109 @@ from .tools import DocumentContext
 DIGEST_PROMPT = "Create a complete case digest from the supplied source document."
 StreamEmitter = Callable[[str], object]
 _REQUEST_PAYLOADS: dict[int, str] = {}
+
+_AGENT_RUN_ERRORS = (
+    ToolRetryError,
+    UnexpectedModelBehavior,
+    ModelAPIError,
+    UsageLimitExceeded,
+    ContentFilterError,
+    ValidationError,
+)
+
+
+class AgentRunError(RuntimeError):
+    """User-facing failure raised when an agent run cannot recover."""
+
+
+def _validation_error_details(error: BaseException) -> list[str]:
+    """Find structured-output validation details hidden in an agent error chain."""
+    seen: set[int] = set()
+    pending: list[BaseException] = [error]
+    while pending:
+        cause = pending.pop()
+        if id(cause) in seen:
+            continue
+        seen.add(id(cause))
+        if isinstance(cause, ValidationError):
+            details: list[str] = []
+            for detail in cause.errors():
+                location = ".".join(str(part) for part in detail.get("loc", ())) or "result"
+                message = str(detail.get("msg", "")).strip()
+                details.append(f"{location}: {message}" if message else location)
+            return details
+        if cause.__context__ is not None:
+            pending.append(cause.__context__)
+        if cause.__cause__ is not None:
+            pending.append(cause.__cause__)
+    return []
+
+
+def _agent_error_message(error: BaseException) -> str:
+    """Translate an internal agent failure into a short actionable message."""
+    message = (str(error).strip() or type(error).__name__).splitlines()[0].strip()
+    if len(message) > 240:
+        message = f"{message[:237]}..."
+
+    details = _validation_error_details(error)
+    if details:
+        visible_details = details[:6]
+        detail_text = "; ".join(visible_details)
+        if len(details) > len(visible_details):
+            detail_text += f"; and {len(details) - len(visible_details)} more"
+        result = f"The model could not produce a valid result: {message} Validation errors: {detail_text}."
+        if any(detail.startswith("result: Invalid JSON") for detail in details):
+            result += (
+                " The reply may have been cut off before it finished;"
+                " try again or use a model with a larger output limit."
+            )
+        return result
+
+    if isinstance(error, ToolRetryError):
+        return f"The agent could not recover from repeated invalid model output: {message}"
+    if isinstance(error, UnexpectedModelBehavior):
+        return f"The model could not produce a valid result: {message}"
+    return f"The agent run failed: {message}"
+
+
+def _last_reply_diagnostic(messages: list[ModelMessage]) -> str | None:
+    """Summarize the final model reply without exposing its contents."""
+    for message in reversed(messages):
+        if not isinstance(message, ModelResponse):
+            continue
+
+        parts: list[str] = []
+        if message.finish_reason is not None:
+            parts.append(f"finish_reason={message.finish_reason}")
+        output_tokens = getattr(message.usage, "output_tokens", None)
+        if output_tokens:
+            parts.append(f"output_tokens={output_tokens}")
+
+        reply_parts: list[str] = []
+        for part in message.parts:
+            if isinstance(part, TextPart):
+                reply_parts.append(f"text {len(part.content)} chars")
+            elif isinstance(part, ToolCallPart):
+                size = f"{len(part.args)} chars" if isinstance(part.args, str) else "structured args"
+                reply_parts.append(f"{part.tool_name} {size}")
+        if reply_parts:
+            parts.append(f"reply: {', '.join(reply_parts)}")
+        return "; ".join(parts) if parts else None
+    return None
+
+
+def _translate_agent_error(
+    error: BaseException,
+    run_messages: list[ModelMessage] | None = None,
+) -> AgentRunError:
+    """Wrap a failed agent run while retaining safe diagnostic context."""
+    if isinstance(error, AgentRunError):
+        return error
+    message = _agent_error_message(error)
+    diagnostic = _last_reply_diagnostic(run_messages or [])
+    if diagnostic is not None:
+        message = f"{message} [reply: {diagnostic}]"
+    return AgentRunError(message)
 
 
 def _context(root: DocumentNode | Mapping[str, object]) -> DocumentContext:
@@ -151,6 +265,21 @@ def _emit_agent_event(emit: StreamEmitter, event: object) -> None:  # pylint: di
         )
 
 
+async def _run_agent(
+    factory: Callable[[], Awaitable[AgentRunResult[Any]]],
+) -> tuple[AgentRunResult[Any], int]:
+    """Run one agent call, capturing messages and elapsed time."""
+    started_at = perf_counter()
+    run_messages: list[ModelMessage] = []
+    try:
+        with capture_run_messages() as captured_messages:
+            run_messages = captured_messages
+            result = await factory()
+    except _AGENT_RUN_ERRORS as error:
+        raise _translate_agent_error(error, run_messages) from error
+    return result, _elapsed_ms(started_at)
+
+
 async def run_case_digest(
     root: DocumentNode | Mapping[str, object],
     *,
@@ -159,15 +288,14 @@ async def run_case_digest(
     agent: Agent[DocumentContext, CaseDigest] | None = None,
 ) -> CaseDigestResult:
     """Run the structured case-digest agent and retain its source references."""
-    started_at = perf_counter()
     context = _context(root)
     runner = agent or build_openrouter_agent(api_key=api_key, model_name=model_name)
-    result = await runner.run(DIGEST_PROMPT, deps=context)
+    result, elapsed_ms = await _run_agent(lambda: runner.run(DIGEST_PROMPT, deps=context))
     return CaseDigestResult(
         digest=result.output,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=_elapsed_ms(started_at),
+        elapsed_ms=elapsed_ms,
     )
 
 
@@ -185,10 +313,9 @@ async def run_chat(
     if not normalized_question:
         raise ValueError("Question must not be empty")
 
-    started_at = perf_counter()
     context = _context(root)
     runner = agent or build_chat_openrouter_agent(api_key=api_key, model_name=model_name)
-    result = await runner.run(normalized_question, deps=context)
+    result, elapsed_ms = await _run_agent(lambda: runner.run(normalized_question, deps=context))
     markdown = result.output.strip()
     if not markdown:
         raise ValueError("The agent returned an empty answer")
@@ -197,10 +324,36 @@ async def run_chat(
         markdown=markdown,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=max(_elapsed_ms(started_at), ended_at_ms - started_at_ms),
+        elapsed_ms=max(elapsed_ms, ended_at_ms - started_at_ms),
         started_at=started_at_ms,
         ended_at=ended_at_ms,
     )
+
+
+async def _run_agent_stream(
+    factory: Callable[[], AbstractAsyncContextManager[AgentRunEvents[Any]]],
+    emit: StreamEmitter,
+) -> tuple[str, int]:
+    """Run one streaming agent call, emitting deltas and capturing the final text."""
+    started_at = perf_counter()
+    run_messages: list[ModelMessage] = []
+    markdown: str | None = None
+    try:
+        with capture_run_messages() as captured_messages:
+            run_messages = captured_messages
+            async with factory() as events:
+                async for event in events:
+                    if isinstance(event, AgentRunResultEvent):
+                        if not isinstance(event.result.output, str):
+                            raise TypeError("The chat agent returned a non-text answer")
+                        markdown = event.result.output.strip()
+                    else:
+                        _emit_agent_event(emit, event)
+    except _AGENT_RUN_ERRORS as error:
+        raise _translate_agent_error(error, run_messages) from error
+    if markdown is None:
+        raise ValueError("The agent returned an empty answer")
+    return markdown, _elapsed_ms(started_at)
 
 
 async def run_chat_stream(  # pylint: disable=too-many-arguments
@@ -217,33 +370,23 @@ async def run_chat_stream(  # pylint: disable=too-many-arguments
     if not normalized_question:
         raise ValueError("Question must not be empty")
 
-    started_at = perf_counter()
     started_at_ms = _epoch_ms()
     context = _context(root)
     runner = agent or build_chat_openrouter_agent(api_key=api_key, model_name=model_name)
     _emit_stream_event(emit, {"type": "start", "model": model_name, "started_at": started_at_ms})
 
-    markdown: str | None = None
-    async with runner.run_stream_events(normalized_question, deps=context) as events:
-        async for event in events:
-            if isinstance(event, AgentRunResultEvent):
-                if not isinstance(event.result.output, str):
-                    raise TypeError("The chat agent returned a non-text answer")
-                markdown = event.result.output.strip()
-            else:
-                _emit_agent_event(emit, event)
-
-    if not markdown:
-        raise ValueError("The agent returned an empty answer")
-
-    ended_at = _epoch_ms()
+    markdown, elapsed_ms = await _run_agent_stream(
+        lambda: runner.run_stream_events(normalized_question, deps=context),
+        emit,
+    )
+    ended_at_ms = _epoch_ms()
     return ChatAnswer(
         markdown=markdown,
         references=context.to_references(),
         model=model_name,
-        elapsed_ms=max(_elapsed_ms(started_at), ended_at - started_at_ms),
+        elapsed_ms=max(elapsed_ms, ended_at_ms - started_at_ms),
         started_at=started_at_ms,
-        ended_at=ended_at,
+        ended_at=ended_at_ms,
     )
 
 
@@ -277,9 +420,7 @@ async def run_request(payload: str, request_id: int) -> str:
         model_name = _required_string(request, "model_name")
 
         if command == "digest":
-            return (
-                await run_case_digest(root, api_key=api_key, model_name=model_name)
-            ).model_dump_json()
+            return (await run_case_digest(root, api_key=api_key, model_name=model_name)).model_dump_json()
         if command == "chat":
             result = await run_chat(
                 root,

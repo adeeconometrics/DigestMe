@@ -20,4 +20,12 @@ describe("caseDigestToMarkdown", () => {
 
     expect(caseDigestToMarkdown(digest)).toContain("[Open the complete decision](https://example.test/decision)");
   });
+
+  it("renders fallbacks when the source does not support digest elements", () => {
+    const markdown = caseDigestToMarkdown(parseCaseDigestJson({}));
+
+    expect(markdown).toContain("_Not stated._");
+    expect(markdown).toContain("_No separate issues were identified._");
+    expect(markdown).not.toContain("undefined");
+  });
 });
