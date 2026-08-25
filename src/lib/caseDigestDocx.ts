@@ -21,23 +21,22 @@ import {
 } from "docx";
 import type { FileChild, IParagraphOptions, ISectionOptions, ParagraphChild, TableVerticalAlign } from "docx";
 
-/** Facts are grouped to mirror the FACTS section in the case-digest template. */
+/**
+ * Facts are grouped to mirror the FACTS section in the case-digest template.
+ * Unsupported fact categories are represented by empty lists.
+ */
 export interface CaseDigestFacts {
   petition: string[];
-  petitioner_version?: string[];
-  respondent_version?: string[];
+  petitioner_version: string[];
+  respondent_version: string[];
 }
 
 /** The complete issue form preserves the ISSUE/S, RULING, and RATIO blocks. */
 export interface CaseDigestIssue {
-  issue?: string;
+  issue: string;
   ruling: string;
   ratio: string;
 }
-
-/** The shorter [ruling, ratio] form is accepted for the supplied JSON shape. */
-export type CaseDigestIssuePair = [ruling: string, ratio: string];
-export type CaseDigestIssueInput = CaseDigestIssue | CaseDigestIssuePair;
 
 /** JSON contract consumed by the case-digest DOCX renderer. */
 export interface CaseDigest {
@@ -56,7 +55,7 @@ export interface CaseDigest {
   petitioners_arguments: string[];
   respondents_arguments: string[];
   procedural_posture: string[];
-  issues: CaseDigestIssueInput[];
+  issues: CaseDigestIssue[];
   supreme_court_ruling: string;
   class_notes: string[];
 }
@@ -153,57 +152,64 @@ function requiredStringArray(record: Record<string, WireValue>, key: string, pat
   return value;
 }
 
-function parseFacts(value: WireValue): CaseDigestFacts {
-  if (!isRecord(value)) {
-    throw new TypeError("Expected facts to be an object.");
-  }
-
-  const facts: CaseDigestFacts = {
-    petition: requiredStringArray(value, "petition", "facts.petition"),
-  };
-
-  if (value.petitioner_version !== undefined && value.petitioner_version !== null) {
-    facts.petitioner_version = requiredStringArray(value, "petitioner_version", "facts.petitioner_version");
-  }
-  if (value.respondent_version !== undefined && value.respondent_version !== null) {
-    facts.respondent_version = requiredStringArray(value, "respondent_version", "facts.respondent_version");
-  }
-
-  return facts;
+/** Normalize an unsupported scalar while preserving strict validation for present values. */
+function normalizedString(record: Record<string, WireValue>, key: string, path = key): string {
+  const value = record[key];
+  if (value === undefined || value === null) return "";
+  return requiredString(record, key, path);
 }
 
-function parseIssue(value: WireValue, index: number): CaseDigestIssueInput {
+/** Normalize an unsupported list while preserving strict validation for present values. */
+function normalizedStringArray(record: Record<string, WireValue>, key: string, path = key): string[] {
+  const value = record[key];
+  if (value === undefined || value === null) return [];
+  return requiredStringArray(record, key, path);
+}
+
+function parseFacts(value: WireValue): CaseDigestFacts {
+  if (value === undefined || value === null) {
+    return { petition: [], petitioner_version: [], respondent_version: [] };
+  }
+  if (!isRecord(value)) throw new TypeError("Expected facts to be an object.");
+
+  return {
+    petition: normalizedStringArray(value, "petition", "facts.petition"),
+    petitioner_version: normalizedStringArray(value, "petitioner_version", "facts.petitioner_version"),
+    respondent_version: normalizedStringArray(value, "respondent_version", "facts.respondent_version"),
+  };
+}
+
+function parseIssue(value: WireValue, index: number): CaseDigestIssue {
   const path = `issues[${index}]`;
 
   if (Array.isArray(value)) {
-    if (value.length !== 2 || value.some((item) => !isWireString(item))) {
+    const [ruling, ratio] = value;
+    if (value.length !== 2 || !isWireString(ruling) || !isWireString(ratio)) {
       throw new TypeError(`Expected ${path} to be a [ruling, ratio] string pair.`);
     }
-    return [String(value[0]), String(value[1])];
+    return { issue: "", ruling, ratio };
   }
 
   if (!isRecord(value)) {
-    throw new TypeError(`Expected ${path} to be an object or [ruling, ratio] pair.`);
+    throw new TypeError(`Expected ${path} to be an object.`);
   }
 
-  const issue: CaseDigestIssue = {
-    ruling: requiredString(value, "ruling", `${path}.ruling`),
-    ratio: requiredString(value, "ratio", `${path}.ratio`),
+  return {
+    issue: normalizedString(value, "issue", `${path}.issue`),
+    ruling: normalizedString(value, "ruling", `${path}.ruling`),
+    ratio: normalizedString(value, "ratio", `${path}.ratio`),
   };
-  if (value.issue !== undefined && value.issue !== null) {
-    issue.issue = requiredString(value, "issue", `${path}.issue`);
-  }
-  return issue;
 }
 
-function parseIssues(value: WireValue): CaseDigestIssueInput[] {
+function parseIssues(value: WireValue): CaseDigestIssue[] {
+  if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     throw new TypeError("Expected issues to be an array.");
   }
   return value.map(parseIssue);
 }
 
-/** Validate and type a parsed object or a JSON string before rendering it. */
+/** Normalize and type a parsed object or JSON string before rendering it. */
 export function parseCaseDigestJson(input: WireValue): CaseDigest {
   const value: WireValue = isWireString(input) ? JSON.parse(input) : input;
   if (!isRecord(value)) {
@@ -211,24 +217,24 @@ export function parseCaseDigestJson(input: WireValue): CaseDigest {
   }
 
   return {
-    case_title: requiredString(value, "case_title"),
-    petitioner: requiredString(value, "petitioner"),
-    respondent: requiredString(value, "respondent"),
-    topic_subtopic: requiredString(value, "topic_subtopic"),
-    subject: requiredString(value, "subject"),
-    ponente: requiredString(value, "ponente"),
-    gr_no_date: requiredString(value, "gr_no_date"),
-    full_text: requiredString(value, "full_text"),
-    summary: requiredString(value, "summary"),
-    doctrine: requiredString(value, "doctrine"),
-    provisions: requiredString(value, "provisions"),
+    case_title: normalizedString(value, "case_title"),
+    petitioner: normalizedString(value, "petitioner"),
+    respondent: normalizedString(value, "respondent"),
+    topic_subtopic: normalizedString(value, "topic_subtopic"),
+    subject: normalizedString(value, "subject"),
+    ponente: normalizedString(value, "ponente"),
+    gr_no_date: normalizedString(value, "gr_no_date"),
+    full_text: normalizedString(value, "full_text"),
+    summary: normalizedString(value, "summary"),
+    doctrine: normalizedString(value, "doctrine"),
+    provisions: normalizedString(value, "provisions"),
     facts: parseFacts(value.facts),
-    petitioners_arguments: requiredStringArray(value, "petitioners_arguments"),
-    respondents_arguments: requiredStringArray(value, "respondents_arguments"),
-    procedural_posture: requiredStringArray(value, "procedural_posture"),
+    petitioners_arguments: normalizedStringArray(value, "petitioners_arguments"),
+    respondents_arguments: normalizedStringArray(value, "respondents_arguments"),
+    procedural_posture: normalizedStringArray(value, "procedural_posture"),
     issues: parseIssues(value.issues),
-    supreme_court_ruling: requiredString(value, "supreme_court_ruling"),
-    class_notes: requiredStringArray(value, "class_notes"),
+    supreme_court_ruling: normalizedString(value, "supreme_court_ruling"),
+    class_notes: normalizedStringArray(value, "class_notes"),
   };
 }
 
@@ -282,11 +288,11 @@ function bulletParagraph(
 }
 
 function contentParagraphs(
-  text: string,
+  text: string | undefined,
   style: TextStyle = {},
   options: IParagraphOptions = {},
 ): Paragraph[] {
-  return nonEmptyLines(text).map((line) => (
+  return nonEmptyLines(text ?? "").map((line) => (
     isBulletLine(line) ? bulletParagraph(line, style, options) : textParagraph(line, style, options)
   ));
 }
@@ -305,11 +311,11 @@ function labelledBulletParagraph(text: string, options: IParagraphOptions = {}):
 }
 
 function listParagraphs(
-  items: string[],
+  items: string[] | undefined,
   labelled = false,
   options: IParagraphOptions = {},
 ): Paragraph[] {
-  return items.flatMap((item) => nonEmptyLines(item).map((line) => (
+  return (items ?? []).flatMap((item) => nonEmptyLines(item).map((line) => (
     labelled ? labelledBulletParagraph(line, options) : bulletParagraph(line, {}, options)
   )));
 }
@@ -373,7 +379,7 @@ function labelledCell(label: string, fill = LABEL_FILL): TableCell {
   ], { fill, margins: DETAILS_CELL_MARGINS });
 }
 
-function detailsValueCell(value: string, style: TextStyle = {}): TableCell {
+function detailsValueCell(value: string | undefined, style: TextStyle = {}): TableCell {
   const paragraphs = contentParagraphs(value, style);
   return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
 }
@@ -383,8 +389,8 @@ function isUrl(value: string): boolean {
 }
 
 /** Full-text entries render as live links when the JSON carries a URL. */
-function fullTextCell(value: string): TableCell {
-  const trimmed = value.trim();
+function fullTextCell(value: string | undefined): TableCell {
+  const trimmed = (value ?? "").trim();
   const paragraphs = isUrl(trimmed)
     ? [paragraph([new ExternalHyperlink({
         link: trimmed,
@@ -439,8 +445,8 @@ function summaryDoctrineTable(caseDigest: CaseDigest): Table {
   ], [TABLE_WIDTH], TABLE_WIDTH);
 }
 
-function provisionParagraphs(provisions: string): Paragraph[] {
-  const lines = nonEmptyLines(provisions);
+function provisionParagraphs(provisions: string | undefined): Paragraph[] {
+  const lines = nonEmptyLines(provisions ?? "");
   if (lines.length === 0) {
     return [];
   }
@@ -461,14 +467,15 @@ function provisionsTable(caseDigest: CaseDigest): Table {
 }
 
 function factsTable(caseDigest: CaseDigest): Table {
-  const facts: Paragraph[] = listParagraphs(caseDigest.facts.petition, false, JUSTIFIED_CELL_TEXT);
-  if (caseDigest.facts.respondent_version !== undefined) {
+  const factsNode = caseDigest.facts;
+  const facts: Paragraph[] = listParagraphs(factsNode.petition, false, JUSTIFIED_CELL_TEXT);
+  if (factsNode.respondent_version.length > 0) {
     facts.push(subheading("Respondent\u2019s version", true));
-    facts.push(...listParagraphs(caseDigest.facts.respondent_version, false, JUSTIFIED_CELL_TEXT));
+    facts.push(...listParagraphs(factsNode.respondent_version, false, JUSTIFIED_CELL_TEXT));
   }
-  if (caseDigest.facts.petitioner_version !== undefined) {
+  if (factsNode.petitioner_version.length > 0) {
     facts.push(subheading("Petitioners\u2019 version", true));
-    facts.push(...listParagraphs(caseDigest.facts.petitioner_version, false, JUSTIFIED_CELL_TEXT));
+    facts.push(...listParagraphs(factsNode.petitioner_version, false, JUSTIFIED_CELL_TEXT));
   }
 
   return table([
@@ -501,18 +508,10 @@ function proceduralPostureTable(caseDigest: CaseDigest): Table {
   ], [TABLE_WIDTH], TABLE_WIDTH);
 }
 
-function normalizeIssue(issue: CaseDigestIssueInput): CaseDigestIssue {
-  if (Array.isArray(issue)) {
-    return { ruling: issue[0], ratio: issue[1] };
-  }
-  return issue;
-}
-
 function issueTable(caseDigest: CaseDigest): Table {
   const rows: TableRow[] = [row([headingCell("Issue/s", 2, ISSUE_CELL_MARGINS)], 400)];
 
-  for (const issueInput of caseDigest.issues) {
-    const issue = normalizeIssue(issueInput);
+  for (const issue of caseDigest.issues) {
     if (issue.issue) {
       rows.push(row([
         cell(contentParagraphs(issue.issue, { bold: true }, JUSTIFIED_CELL_TEXT), {
@@ -604,8 +603,8 @@ export function createCaseDigestDocument(
 
   return new Document({
     creator: options.creator ?? "Digest Me",
-    title: caseDigest.case_title,
-    subject: caseDigest.subject,
+    title: caseDigest.case_title ?? "Case Digest",
+    subject: caseDigest.subject ?? "",
     keywords: "case digest",
     sections: [section],
   });
@@ -628,7 +627,7 @@ export function caseDigestJsonToDocx(
 }
 
 /** Return the stable download name used for a generated case-digest document. */
-export function caseDigestFileName(caseTitle: string): string {
+export function caseDigestFileName(caseTitle = ""): string {
   const slug = caseTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")

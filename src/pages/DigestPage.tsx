@@ -23,7 +23,7 @@ import {
   type DigestSession,
   type PersistedChatMessage,
 } from "../chat/session";
-import { cancelAgentRequest, disposeEngine, runCaseDigestAgent, streamChatAgent } from "../pyodide/engineLoader";
+import { cancelAgentRequest, disposeEngine, runCaseDigestAgent, streamChatAgent, type AgentRequestState } from "../pyodide/engineLoader";
 import type { AgentExecution } from "../pyodide/types";
 import type { DocumentSummary } from "../types";
 
@@ -31,7 +31,7 @@ const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer")
 const DocxPreviewModal = lazy(() => import("../components/DocxPreviewModal"));
 
 type DigestStatus = "idle" | "parsing" | "error";
-type AgentStatus = "idle" | "running" | "failed";
+type AgentStatus = "idle" | "queued" | "running" | "complete" | "failed";
 
 function makeMessageId(): string {
   const randomId = globalThis.crypto?.randomUUID?.();
@@ -55,6 +55,9 @@ interface DigestPreview {
 
 interface DigestPageProps {
   documentId: string | null;
+  autoRunDigest?: boolean;
+  queuePosition?: number;
+  pendingFile?: File | null;
   onDocumentReady?: (summary: DocumentSummary) => void;
   onStatusChange?: (status: AgentStatus) => void;
   onStorageError?: (message: string) => void;
@@ -73,6 +76,9 @@ interface ThreadSnapshot {
 /** Case digest: a chat session over a locally parsed PDF. */
 export default function DigestPage({
   documentId,
+  autoRunDigest,
+  queuePosition,
+  pendingFile,
   onDocumentReady,
   onStatusChange,
   onStorageError,
@@ -87,7 +93,7 @@ export default function DigestPage({
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
   const [traceRequest, setTraceRequest] = useState<{ nodeIds: string[]; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>(() => queuePosition === undefined ? "idle" : "queued");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
   const [draft, setDraft] = useState("");
   const [preview, setPreview] = useState<DigestPreview | null>(null);
@@ -109,6 +115,9 @@ export default function DigestPage({
   const sessionDocumentIdRef = useRef(sessionDocumentId);
   const isSessionReadyRef = useRef(isSessionReady);
   const onStatusChangeRef = useRef(onStatusChange);
+  const pendingFileConsumedRef = useRef(false);
+  const autoRunConsumedRef = useRef(false);
+  const digestReadyRef = useRef(false);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -149,6 +158,13 @@ export default function DigestPage({
     onStatusChangeRef.current = onStatusChange;
   }, [onStatusChange]);
 
+  // Parse a file handed to this tab from a sidebar drop before any interaction.
+  useEffect(() => {
+    if (!pendingFile || pendingFileConsumedRef.current) return;
+    pendingFileConsumedRef.current = true;
+    queueMicrotask(() => void processPdf(pendingFile));
+  }, [pendingFile]);
+
   // Keep the newest message in view as the thread grows.
   useEffect(() => {
     const log = logRef.current;
@@ -158,6 +174,80 @@ export default function DigestPage({
   const pushError = useCallback((text: string): void => {
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "assistant", kind: "error", text });
   }, [pushMessage]);
+
+  /** Connect to the agent and compose the structured case digest for a parsed document. */
+  const runCaseDigest = useCallback(async (selectedDocument: ParsedDocument): Promise<void> => {
+    const requestId = ++agentRequestRef.current;
+    setAgentStatus("queued");
+    const credentials = await getAgentRuntimeCredentials().catch(() => null);
+    if (requestId !== agentRequestRef.current) return;
+    if (!credentials) {
+      pushError("Save an OpenRouter model and API key in Settings before running /digest.");
+      setAgentStatus("failed");
+      return;
+    }
+
+    const requestOptions = {
+      onRequestId: (loaderRequestId: number) => {
+        if (requestId === agentRequestRef.current) {
+          activeAgentRequestIdRef.current = loaderRequestId;
+        } else {
+          cancelAgentRequest(loaderRequestId);
+        }
+      },
+      onRequestState: (nextState: AgentRequestState) => {
+        if (requestId === agentRequestRef.current) setAgentStatus(nextState);
+      },
+    };
+
+    let completed = false;
+    try {
+      const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
+      if (requestId !== agentRequestRef.current) return;
+
+      const markdown = caseDigestToMarkdown(result.digest);
+      const docxBlob = await renderCaseDigestDocx(result.digest);
+      if (requestId !== agentRequestRef.current) return;
+      const docxUrl = URL.createObjectURL(docxBlob);
+      const messageId = makeMessageId();
+      const docxFileId = `${sessionIdRef.current}-${messageId}`;
+      const docxFileName = caseDigestFileName(result.digest.case_title);
+      docxUrlsRef.current.add(docxUrl);
+      digestFilesRef.current.set(docxFileId, {
+        id: docxFileId,
+        sessionId: sessionIdRef.current,
+        fileName: docxFileName,
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        blob: docxBlob,
+      });
+      pushMessage({
+        id: messageId,
+        at: new Date().toISOString(),
+        role: "assistant",
+        kind: "digest",
+        markdown,
+        digest: result.digest,
+        refs: mapAgentReferences(selectedDocument.root, result.references),
+        execution: { model: result.model, elapsedMs: result.elapsedMs },
+        docxUrl,
+        docxFileName,
+        docxFileId,
+        docxBlob,
+      });
+      digestReadyRef.current = true;
+      completed = true;
+    } catch (error) {
+      if (requestId === agentRequestRef.current) {
+        pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
+        setAgentStatus("failed");
+      }
+    } finally {
+      if (requestId === agentRequestRef.current) {
+        activeAgentRequestIdRef.current = null;
+        if (completed) setAgentStatus("complete");
+      }
+    }
+  }, [pushError, pushMessage]);
 
   const stopAgent = useCallback((removeStreamMessage: boolean): void => {
     agentRequestRef.current += 1;
@@ -170,7 +260,7 @@ export default function DigestPage({
       setMessages((previous) => previous.filter((message) => message.id !== streamMessageId));
     }
     if (removeStreamMessage) {
-      setAgentStatus("idle");
+      setAgentStatus(digestReadyRef.current ? "complete" : "idle");
     }
   }, []);
 
@@ -248,7 +338,10 @@ export default function DigestPage({
           docxUrlsRef.current.add(docxUrl);
           return { ...message, docxBlob: asset.blob, docxUrl };
         });
-        setSessionId(thread?.threadId ?? storedSession?.session.id ?? makeSessionId());
+        const digestReady = restoredMessages.some((message) => message.kind === "digest");
+        const restoredSessionId = thread?.threadId ?? storedSession?.session.id ?? makeSessionId();
+        setSessionId(restoredSessionId);
+        sessionIdRef.current = restoredSessionId;
         setSessionCreatedAt(thread?.createdAt ?? storedSession?.session.createdAt ?? new Date().toISOString());
         setSessionDocumentId(documentId);
         setIsSessionReady(true);
@@ -261,18 +354,25 @@ export default function DigestPage({
         setDraft("");
         setPreview(null);
         setMessages(restoredMessages);
-        setAgentStatus("idle");
+        digestReadyRef.current = digestReady;
+        setAgentStatus(digestReady ? "complete" : queuePosition === undefined ? "idle" : "queued");
         lastPersistedFingerprintRef.current = "";
+        if (autoRunDigest && !digestReady && !autoRunConsumedRef.current) {
+          autoRunConsumedRef.current = true;
+          pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: "/digest" });
+          void runCaseDigest(source.document);
+        }
       } catch (error) {
         if (!mounted) return;
         setStatus("error");
+        if (queuePosition !== undefined) setAgentStatus("failed");
         pushError(error instanceof Error ? error.message : "That document could not be loaded from local storage.");
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [clearDocxAssets, documentId, pushError]);
+  }, [autoRunDigest, clearDocxAssets, documentId, pushError, pushMessage, queuePosition, runCaseDigest]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -303,6 +403,8 @@ export default function DigestPage({
       return;
     }
 
+    digestReadyRef.current = false;
+    setAgentStatus(queuePosition === undefined ? "idle" : "queued");
     const requestId = ++agentRequestRef.current;
     setStatus("parsing");
     try {
@@ -366,6 +468,7 @@ export default function DigestPage({
       });
     } catch (error) {
       setStatus("error");
+      if (queuePosition !== undefined) setAgentStatus("failed");
       pushError(error instanceof Error ? error.message : "This PDF could not be parsed.");
     }
   }
@@ -388,7 +491,7 @@ export default function DigestPage({
   }
 
   async function submitQuestion(rawQuestion: string): Promise<void> {
-    if (status === "parsing" || agentStatus === "running") return;
+    if (status === "parsing" || agentStatus === "queued" || agentStatus === "running") return;
     const question = rawQuestion.trim();
     if (!question) return;
     const requestId = ++agentRequestRef.current;
@@ -403,6 +506,11 @@ export default function DigestPage({
       return;
     }
 
+    if (isDigestCommand(question)) {
+      await runCaseDigest(selectedDocument);
+      return;
+    }
+
     const credentials = await getAgentRuntimeCredentials().catch(() => null);
     if (requestId !== agentRequestRef.current) return;
 
@@ -414,6 +522,10 @@ export default function DigestPage({
           cancelAgentRequest(loaderRequestId);
         }
       },
+      onRequestState: (nextState: AgentRequestState) => {
+        if (requestId === agentRequestRef.current) setAgentStatus(nextState);
+      },
+    };
     };
 
     if (isDigestCommand(question)) {
@@ -488,7 +600,7 @@ export default function DigestPage({
       return;
     }
 
-    setAgentStatus("running");
+    setAgentStatus("queued");
     const streamMessageId = makeMessageId();
     const streamStartedAt = Date.now();
     let latestAssistant = createInitialAssistantMessage();
@@ -562,7 +674,7 @@ export default function DigestPage({
       if (activeStreamMessageRef.current === streamMessageId) activeStreamMessageRef.current = null;
       if (requestId === agentRequestRef.current) {
         activeAgentRequestIdRef.current = null;
-        if (completed) setAgentStatus("idle");
+        if (completed) setAgentStatus(digestReadyRef.current ? "complete" : "idle");
       }
     }
   }
@@ -580,7 +692,7 @@ export default function DigestPage({
 
   /** Reset the engine after it crashed so the next request starts fresh. */
   function handleReloadAgent(): void {
-    setAgentStatus("idle");
+    setAgentStatus(digestReadyRef.current ? "complete" : "idle");
     disposeEngine();
   }
 
@@ -599,7 +711,7 @@ export default function DigestPage({
     setSelectedNodeId(node.id);
   }, []);
 
-  const isBusy = status === "parsing" || agentStatus === "running";
+  const isBusy = status === "parsing" || agentStatus === "queued" || agentStatus === "running";
 
   return (
     <div
@@ -614,22 +726,10 @@ export default function DigestPage({
       onDrop={handleDrop}
     >
       <section className="session-chat">
-        <header className="session-header">
-          <div className="session-title">
-            <span className="session-mark"><Icon name="spark" size={16} /></span>
-            <div>
-              <strong>{selected ? selected.fileName : "Case digest session"}</strong>
-              <small>{selected ? `${selected.metrics.pageCount} pages · parsed on-device` : "attach a case file to begin"}</small>
-            </div>
-          </div>
-          {selected && (
-            <span className="session-badge"><Icon name="check" size={12} /> local</span>
-          )}
-        </header>
-
         <div className="chat-log" ref={logRef}>
           {messages.map((message) => (
             <ChatBubble
+              agentStatus={agentStatus}
               key={message.id}
               message={message}
               onPreviewDocx={handlePreviewDigest}
@@ -639,6 +739,12 @@ export default function DigestPage({
         </div>
 
         <div className="chat-composer-shell">
+          {agentStatus === "queued" && (
+            <div className="agent-progress is-queued" role="status">
+              <span aria-hidden="true" className="loader agent-queue-loader" />
+              <span>{queuePosition === undefined ? "Waiting for the case-digest agent..." : `Queued for digest processing · position ${queuePosition}`}</span>
+            </div>
+          )}
           {agentStatus === "running" && (
             <div className="agent-progress" role="status">
               <span className="agent-progress-dot" />
@@ -750,12 +856,13 @@ export default function DigestPage({
 }
 
 interface ChatBubbleProps {
+  agentStatus: AgentStatus;
   message: ChatMessage;
   onPreviewDocx: (message: Extract<ChatMessage, { kind: "digest" }>) => void;
   onReferenceClick: (hit: RetrievalHit) => void;
 }
 
-function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProps) {
+function ChatBubble({ agentStatus, message, onPreviewDocx, onReferenceClick }: ChatBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="chat-row is-user">
@@ -775,7 +882,17 @@ function ChatBubble({ message, onPreviewDocx, onReferenceClick }: ChatBubbleProp
 
   return (
     <div className="chat-row is-assistant">
-      <span className="chat-avatar"><Icon name="tree" size={15} /></span>
+      <span className="chat-avatar">
+        {message.kind === "agent-stream" ? (
+          agentStatus === "queued" ? (
+            <span aria-label="Agent request is waiting in the queue" className="loader chat-avatar-loader" role="status" />
+          ) : (
+            <span aria-label="Agent connected and streaming" className="agent-spin chat-avatar-spin" role="status" />
+          )
+        ) : (
+          <Icon name="tree" size={15} />
+        )}
+      </span>
       <div className="chat-bubble bubble-assistant">
         {message.kind === "welcome" && (
           <>

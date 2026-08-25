@@ -7,12 +7,26 @@ from httpx2 import AsyncClient, Request, Response
 from httpx2._transports import AsyncHTTPTransport
 from httpx2._types import AsyncByteStream
 from pydantic_ai import Agent
+from pydantic_ai.agent.abstract import AgentRetries
 from pydantic_ai.models import Model
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
+from pydantic_ai.settings import ModelSettings
 
 from .schemas import CaseDigest
 from .tools import DocumentContext, global_search, navigate_document
+
+
+AGENT_MAX_TOKENS = 16_384
+"""Output budget for a complete structured digest response."""
+
+CHAT_MAX_TOKENS = 4096
+
+AGENT_MODEL_SETTINGS: ModelSettings = ModelSettings(max_tokens=AGENT_MAX_TOKENS)
+CHAT_MODEL_SETTINGS: ModelSettings = ModelSettings(max_tokens=CHAT_MAX_TOKENS)
+
+AGENT_RETRIES: AgentRetries = {"tools": 2, "output": 3}
+"""Retry budgets for recoverable tool and structured-output mistakes."""
 
 
 AGENT_INSTRUCTIONS = """\
@@ -20,6 +34,16 @@ Create a case digest from the supplied source document.
 Start with document navigation, then retrieve the sections relevant to each digest field.
 Use global search as a fallback when section names are not descriptive enough, and follow each hit with navigation.
 Ground every field in the source and preserve section/page references in study notes when useful.
+Always return every field defined by the output schema. Never omit a field and never use null: return an empty string ("")
+for an unsupported scalar, an empty list ([]) for an unsupported list, an object containing all three empty-or-populated
+fact lists, and an array of issue objects containing issue, ruling, and ratio. Do not use the legacy [ruling, ratio] issue
+pair form.
+Keep each field concise enough that the entire digest fits in one response.
+Keep scalar fields to concise paragraphs, use no more than six items in any list,
+and include no more than four issue objects. Keep scalar fields at most 1,200
+characters and list items at most 600 characters. Paraphrase instead of
+reproducing long source passages.
+Return only the fields defined by the output schema; never add extra keys.
 """
 
 
@@ -39,6 +63,8 @@ def build_agent(model: Model | str | None = None) -> Agent[DocumentContext, Case
         name="case-digest-engine",
         deps_type=DocumentContext,
         output_type=CaseDigest,
+        model_settings=AGENT_MODEL_SETTINGS,
+        retries=AGENT_RETRIES,
         instructions=AGENT_INSTRUCTIONS,
         tools=[navigate_document, global_search],
     )
@@ -51,6 +77,8 @@ def build_chat_agent(model: Model | str | None = None) -> Agent[DocumentContext,
         name="case-digest-chat",
         deps_type=DocumentContext,
         output_type=str,
+        model_settings=CHAT_MODEL_SETTINGS,
+        retries=AGENT_RETRIES,
         instructions=CHAT_AGENT_INSTRUCTIONS,
         tools=[navigate_document, global_search],
     )

@@ -4,6 +4,22 @@ import Icon from "./Icon";
 
 type RenderStatus = "rendering" | "ready" | "error";
 
+function fitDocxPages(renderContainer: HTMLDivElement): void {
+  const wrapper = renderContainer.querySelector<HTMLElement>(".digest-doc-wrapper");
+  const pages = Array.from(renderContainer.querySelectorAll<HTMLElement>(".digest-doc-wrapper > section.digest-doc"));
+  if (!wrapper || pages.length === 0) return;
+
+  const wrapperStyle = window.getComputedStyle(wrapper);
+  const horizontalPadding = (Number.parseFloat(wrapperStyle.paddingLeft) || 0) + (Number.parseFloat(wrapperStyle.paddingRight) || 0);
+  const availableWidth = renderContainer.clientWidth - horizontalPadding;
+  if (availableWidth <= 0) return;
+
+  const pageWidth = Math.max(...pages.map((page) => page.offsetWidth));
+  const scale = pageWidth > 0 ? Math.min(1, availableWidth / pageWidth) : 1;
+  // CSS zoom scales layout dimensions too, keeping the scroll area aligned with the visible page.
+  for (const page of pages) page.style.setProperty("zoom", String(scale));
+}
+
 interface DocxPreviewModalProps {
   /** The generated DOCX to render, kept in memory (never re-fetched). */
   blob: Blob;
@@ -28,6 +44,7 @@ export default function DocxPreviewModal({ blob, fileName, downloadUrl, onClose 
     const container = bodyRef.current;
     if (!container) return;
     let cancelled = false;
+    let resizeObserver: ResizeObserver | undefined;
 
     setStatus("rendering");
     void renderAsync(blob, container, undefined, {
@@ -35,7 +52,14 @@ export default function DocxPreviewModal({ blob, fileName, downloadUrl, onClose 
       useBase64URL: true,
     })
       .then(() => {
-        if (!cancelled) setStatus("ready");
+        if (cancelled) return;
+        fitDocxPages(container);
+        const viewport = container.parentElement;
+        if (viewport && typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(() => fitDocxPages(container));
+          resizeObserver.observe(viewport);
+        }
+        setStatus("ready");
       })
       .catch(() => {
         if (!cancelled) setStatus("error");
@@ -43,6 +67,7 @@ export default function DocxPreviewModal({ blob, fileName, downloadUrl, onClose 
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       container.innerHTML = "";
     };
   }, [blob]);

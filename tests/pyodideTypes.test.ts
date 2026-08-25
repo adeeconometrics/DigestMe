@@ -49,6 +49,36 @@ describe("Pyodide result contracts", () => {
     expect(result.elapsedMs).toBe(388000);
   });
 
+  it("normalizes a sparse structured digest at the browser boundary", () => {
+    const result = parseCaseDigestAgentResult({
+      digest: {},
+      references: [],
+      model: "deepseek/deepseek-v3",
+      elapsed_ms: 12,
+    });
+
+    expect(result.digest).toEqual({
+      case_title: "",
+      petitioner: "",
+      respondent: "",
+      topic_subtopic: "",
+      subject: "",
+      ponente: "",
+      gr_no_date: "",
+      full_text: "",
+      summary: "",
+      doctrine: "",
+      provisions: "",
+      facts: { petition: [], petitioner_version: [], respondent_version: [] },
+      petitioners_arguments: [],
+      respondents_arguments: [],
+      procedural_posture: [],
+      issues: [],
+      supreme_court_ruling: "",
+      class_notes: [],
+    });
+  });
+
   it("rejects malformed execution metadata", () => {
     expect(() => parseChatAgentResult({ markdown: "answer", references: [], model: "model", elapsed_ms: -1 })).toThrow(
       "Agent returned an invalid execution time.",

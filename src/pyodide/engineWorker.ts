@@ -361,7 +361,8 @@ async function execute(request: WorkerRunRequest, isCancelled: () => boolean): P
   }
 }
 
-const MAX_CONCURRENT_REQUESTS = 2;
+// pydantic-ai runs inside one Pyodide interpreter; keep the interpreter single-flight.
+const MAX_CONCURRENT_REQUESTS = 1;
 const requestScheduler = createRequestScheduler<WorkerRunRequest>(MAX_CONCURRENT_REQUESTS, async (request, isCancelled) => {
   if (isCancelled()) return;
   workerScope.postMessage({ type: "started", requestId: request.requestId });
