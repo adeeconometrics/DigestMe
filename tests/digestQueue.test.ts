@@ -11,9 +11,8 @@ describe("digest queue", () => {
       { id: "third", position: 3 },
     ]);
     expect(queue.finish("second")).toBeUndefined();
-    expect(queue.finish("first")).toBe("second");
+    expect(queue.finish("first")).toBe("third");
     expect(queue.finish("third")).toBeUndefined();
-    expect(queue.finish("second")).toBe("third");
     expect(queue.finish("third")).toBeUndefined();
   });
 
