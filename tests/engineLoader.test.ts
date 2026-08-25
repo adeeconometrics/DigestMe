@@ -156,6 +156,35 @@ describe("engineLoader request timers", () => {
     await expect(run).resolves.toMatchObject({ markdown: "# Held: affirmed" });
   });
 
+  it("keeps a second request queued until its worker slot opens", async () => {
+    const firstStates: string[] = [];
+    const secondStates: string[] = [];
+    const first = runChatAgent(ROOT, "first queued state", CREDENTIALS, {
+      onRequestState: (state) => firstStates.push(state),
+    });
+    const worker = lastWorker();
+    const firstId = postedRequestId(worker);
+    const second = runChatAgent(ROOT, "second queued state", CREDENTIALS, {
+      onRequestState: (state) => secondStates.push(state),
+    });
+    const secondId = postedRequestId(worker);
+
+    expect(firstStates).toEqual(["queued"]);
+    expect(secondStates).toEqual(["queued"]);
+    await bootEngine(worker);
+    worker.emit({ type: "started", requestId: firstId });
+    expect(firstStates).toEqual(["queued", "running"]);
+    expect(secondStates).toEqual(["queued"]);
+
+    worker.emit({ type: "result", requestId: firstId, result: CHAT_RESULT });
+    worker.emit({ type: "started", requestId: secondId });
+    expect(secondStates).toEqual(["queued", "running"]);
+    worker.emit({ type: "result", requestId: secondId, result: CHAT_RESULT });
+
+    await expect(first).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+    await expect(second).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+  });
+
   it("cancels one request promptly without terminating the shared worker", async () => {
     let requestId = 0;
     const run = runChatAgent(ROOT, "cancel me", CREDENTIALS, { onRequestId: (id) => { requestId = id; } });

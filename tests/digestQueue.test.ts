@@ -25,4 +25,13 @@ describe("digest queue", () => {
     expect(queue.remove("first")).toBeUndefined();
     expect(queue.finish("last")).toBeUndefined();
   });
+
+  it("keeps a later batch behind jobs already waiting", () => {
+    const queue = createDigestQueue();
+
+    queue.enqueue(["first", "second"]);
+    expect(queue.enqueue(["later"])).toEqual([{ id: "later", position: 3 }]);
+    expect(queue.finish("first")).toBe("second");
+    expect(queue.finish("second")).toBe("later");
+  });
 });
