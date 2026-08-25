@@ -25,6 +25,8 @@ export const EDGE_BASE = {
 export const EDGE_TRACE = {
   color: "#e03131",
   size: 2.6,
+  /** Sigma edge program: draws the arrowhead at the target (child) end. */
+  type: "arrow",
 } as const;
 
 /** Dimmed state for edges outside an active trace. */
@@ -80,23 +82,27 @@ export function treeToGraph(root: DocumentNode): Graph<TreeNodePayload> {
 }
 
 /**
+ * Builds the id → parent-id index for the whole tree in a single pass.
+ * Shared by the single-path and multi-path tracers below.
+ */
+function buildParentIndex(root: DocumentNode): Map<string, string | null> {
+  const parents = new Map<string, string | null>();
+  const visit = (node: DocumentNode, parentId: string | null): void => {
+    parents.set(node.id, parentId);
+    node.children.forEach((child) => visit(child, node.id));
+  };
+  visit(root, null);
+  return parents;
+}
+
+/**
  * Ids from the document root down to the target node (inclusive), or null
  * when the id does not belong to this tree. Used to light up the context
  * trace when retrieval results are visualized.
  */
 export function pathToNode(root: DocumentNode, nodeId: string): string[] | null {
-  const parents = new Map<string, string | null>();
-  let found: DocumentNode | null = null;
-
-  const visit = (node: DocumentNode, parentId: string | null): void => {
-    parents.set(node.id, parentId);
-    if (node.id === nodeId) found = node;
-    if (found) return;
-    node.children.forEach((child) => visit(child, node.id));
-  };
-
-  visit(root, null);
-  if (!found) return null;
+  const parents = buildParentIndex(root);
+  if (!parents.has(nodeId)) return null;
 
   const path: string[] = [];
   let cursor: string | null = nodeId;
@@ -105,4 +111,24 @@ export function pathToNode(root: DocumentNode, nodeId: string): string[] | null 
     cursor = parents.get(cursor) ?? null;
   }
   return path;
+}
+
+/**
+ * Union of the root→node ancestor chains for every requested id, or an
+ * empty set when none of the ids belong to this tree. Powers the multi-path
+ * "path tracer" that lights up every cited section in one pass.
+ */
+export function pathsToNodes(root: DocumentNode, nodeIds: string[]): Set<string> {
+  const parents = buildParentIndex(root);
+  const traced = new Set<string>();
+
+  for (const nodeId of nodeIds) {
+    let cursor = parents.has(nodeId) ? nodeId : null;
+    while (cursor !== null) {
+      traced.add(cursor);
+      cursor = parents.get(cursor) ?? null;
+    }
+  }
+
+  return traced;
 }
