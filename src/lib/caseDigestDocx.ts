@@ -21,9 +21,12 @@ import {
 } from "docx";
 import type { FileChild, IParagraphOptions, ISectionOptions, ParagraphChild, TableVerticalAlign } from "docx";
 
-/** Facts are grouped to mirror the FACTS section in the case-digest template. */
+/**
+ * Facts are grouped to mirror the FACTS section in the case-digest template.
+ * Unsupported fact categories may be absent, while present values keep their shape.
+ */
 export interface CaseDigestFacts {
-  petition: string[];
+  petition?: string[];
   petitioner_version?: string[];
   respondent_version?: string[];
 }
@@ -31,8 +34,8 @@ export interface CaseDigestFacts {
 /** The complete issue form preserves the ISSUE/S, RULING, and RATIO blocks. */
 export interface CaseDigestIssue {
   issue?: string;
-  ruling: string;
-  ratio: string;
+  ruling?: string;
+  ratio?: string;
 }
 
 /** The shorter [ruling, ratio] form is accepted for the supplied JSON shape. */
@@ -41,24 +44,24 @@ export type CaseDigestIssueInput = CaseDigestIssue | CaseDigestIssuePair;
 
 /** JSON contract consumed by the case-digest DOCX renderer. */
 export interface CaseDigest {
-  case_title: string;
-  petitioner: string;
-  respondent: string;
-  topic_subtopic: string;
-  subject: string;
-  ponente: string;
-  gr_no_date: string;
-  full_text: string;
-  summary: string;
-  doctrine: string;
-  provisions: string;
-  facts: CaseDigestFacts;
-  petitioners_arguments: string[];
-  respondents_arguments: string[];
-  procedural_posture: string[];
-  issues: CaseDigestIssueInput[];
-  supreme_court_ruling: string;
-  class_notes: string[];
+  case_title?: string;
+  petitioner?: string;
+  respondent?: string;
+  topic_subtopic?: string;
+  subject?: string;
+  ponente?: string;
+  gr_no_date?: string;
+  full_text?: string;
+  summary?: string;
+  doctrine?: string;
+  provisions?: string;
+  facts?: CaseDigestFacts;
+  petitioners_arguments?: string[];
+  respondents_arguments?: string[];
+  procedural_posture?: string[];
+  issues?: CaseDigestIssueInput[];
+  supreme_court_ruling?: string;
+  class_notes?: string[];
 }
 
 /** Presentation options for the generated document. */
@@ -153,22 +156,31 @@ function requiredStringArray(record: Record<string, WireValue>, key: string, pat
   return value;
 }
 
+/** Read a nullable string while preserving strict validation for present values. */
+function optionalString(record: Record<string, WireValue>, key: string, path = key): string | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  return requiredString(record, key, path);
+}
+
+/** Read a nullable string array while preserving strict validation for present values. */
+function optionalStringArray(record: Record<string, WireValue>, key: string, path = key): string[] | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  return requiredStringArray(record, key, path);
+}
+
 function parseFacts(value: WireValue): CaseDigestFacts {
   if (!isRecord(value)) {
+    if (value === undefined || value === null) return {};
     throw new TypeError("Expected facts to be an object.");
   }
 
-  const facts: CaseDigestFacts = {
-    petition: requiredStringArray(value, "petition", "facts.petition"),
-  };
-
-  if (value.petitioner_version !== undefined && value.petitioner_version !== null) {
-    facts.petitioner_version = requiredStringArray(value, "petitioner_version", "facts.petitioner_version");
+  const facts: CaseDigestFacts = {};
+  for (const key of ["petition", "petitioner_version", "respondent_version"] as const) {
+    const parsed = optionalStringArray(value, key, `facts.${key}`);
+    if (parsed !== undefined) facts[key] = parsed;
   }
-  if (value.respondent_version !== undefined && value.respondent_version !== null) {
-    facts.respondent_version = requiredStringArray(value, "respondent_version", "facts.respondent_version");
-  }
-
   return facts;
 }
 
@@ -186,17 +198,16 @@ function parseIssue(value: WireValue, index: number): CaseDigestIssueInput {
     throw new TypeError(`Expected ${path} to be an object or [ruling, ratio] pair.`);
   }
 
-  const issue: CaseDigestIssue = {
-    ruling: requiredString(value, "ruling", `${path}.ruling`),
-    ratio: requiredString(value, "ratio", `${path}.ratio`),
-  };
-  if (value.issue !== undefined && value.issue !== null) {
-    issue.issue = requiredString(value, "issue", `${path}.issue`);
+  const issue: CaseDigestIssue = {};
+  for (const key of ["issue", "ruling", "ratio"] as const) {
+    const parsed = optionalString(value, key, `${path}.${key}`);
+    if (parsed !== undefined) issue[key] = parsed;
   }
   return issue;
 }
 
-function parseIssues(value: WireValue): CaseDigestIssueInput[] {
+function parseIssues(value: WireValue): CaseDigestIssueInput[] | undefined {
+  if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
     throw new TypeError("Expected issues to be an array.");
   }
@@ -211,24 +222,24 @@ export function parseCaseDigestJson(input: WireValue): CaseDigest {
   }
 
   return {
-    case_title: requiredString(value, "case_title"),
-    petitioner: requiredString(value, "petitioner"),
-    respondent: requiredString(value, "respondent"),
-    topic_subtopic: requiredString(value, "topic_subtopic"),
-    subject: requiredString(value, "subject"),
-    ponente: requiredString(value, "ponente"),
-    gr_no_date: requiredString(value, "gr_no_date"),
-    full_text: requiredString(value, "full_text"),
-    summary: requiredString(value, "summary"),
-    doctrine: requiredString(value, "doctrine"),
-    provisions: requiredString(value, "provisions"),
+    case_title: optionalString(value, "case_title"),
+    petitioner: optionalString(value, "petitioner"),
+    respondent: optionalString(value, "respondent"),
+    topic_subtopic: optionalString(value, "topic_subtopic"),
+    subject: optionalString(value, "subject"),
+    ponente: optionalString(value, "ponente"),
+    gr_no_date: optionalString(value, "gr_no_date"),
+    full_text: optionalString(value, "full_text"),
+    summary: optionalString(value, "summary"),
+    doctrine: optionalString(value, "doctrine"),
+    provisions: optionalString(value, "provisions"),
     facts: parseFacts(value.facts),
-    petitioners_arguments: requiredStringArray(value, "petitioners_arguments"),
-    respondents_arguments: requiredStringArray(value, "respondents_arguments"),
-    procedural_posture: requiredStringArray(value, "procedural_posture"),
+    petitioners_arguments: optionalStringArray(value, "petitioners_arguments"),
+    respondents_arguments: optionalStringArray(value, "respondents_arguments"),
+    procedural_posture: optionalStringArray(value, "procedural_posture"),
     issues: parseIssues(value.issues),
-    supreme_court_ruling: requiredString(value, "supreme_court_ruling"),
-    class_notes: requiredStringArray(value, "class_notes"),
+    supreme_court_ruling: optionalString(value, "supreme_court_ruling"),
+    class_notes: optionalStringArray(value, "class_notes"),
   };
 }
 
@@ -282,11 +293,11 @@ function bulletParagraph(
 }
 
 function contentParagraphs(
-  text: string,
+  text: string | undefined,
   style: TextStyle = {},
   options: IParagraphOptions = {},
 ): Paragraph[] {
-  return nonEmptyLines(text).map((line) => (
+  return nonEmptyLines(text ?? "").map((line) => (
     isBulletLine(line) ? bulletParagraph(line, style, options) : textParagraph(line, style, options)
   ));
 }
@@ -305,11 +316,11 @@ function labelledBulletParagraph(text: string, options: IParagraphOptions = {}):
 }
 
 function listParagraphs(
-  items: string[],
+  items: string[] | undefined,
   labelled = false,
   options: IParagraphOptions = {},
 ): Paragraph[] {
-  return items.flatMap((item) => nonEmptyLines(item).map((line) => (
+  return (items ?? []).flatMap((item) => nonEmptyLines(item).map((line) => (
     labelled ? labelledBulletParagraph(line, options) : bulletParagraph(line, {}, options)
   )));
 }
@@ -373,7 +384,7 @@ function labelledCell(label: string, fill = LABEL_FILL): TableCell {
   ], { fill, margins: DETAILS_CELL_MARGINS });
 }
 
-function detailsValueCell(value: string, style: TextStyle = {}): TableCell {
+function detailsValueCell(value: string | undefined, style: TextStyle = {}): TableCell {
   const paragraphs = contentParagraphs(value, style);
   return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
 }
@@ -383,8 +394,8 @@ function isUrl(value: string): boolean {
 }
 
 /** Full-text entries render as live links when the JSON carries a URL. */
-function fullTextCell(value: string): TableCell {
-  const trimmed = value.trim();
+function fullTextCell(value: string | undefined): TableCell {
+  const trimmed = (value ?? "").trim();
   const paragraphs = isUrl(trimmed)
     ? [paragraph([new ExternalHyperlink({
         link: trimmed,
@@ -439,8 +450,8 @@ function summaryDoctrineTable(caseDigest: CaseDigest): Table {
   ], [TABLE_WIDTH], TABLE_WIDTH);
 }
 
-function provisionParagraphs(provisions: string): Paragraph[] {
-  const lines = nonEmptyLines(provisions);
+function provisionParagraphs(provisions: string | undefined): Paragraph[] {
+  const lines = nonEmptyLines(provisions ?? "");
   if (lines.length === 0) {
     return [];
   }
@@ -461,14 +472,15 @@ function provisionsTable(caseDigest: CaseDigest): Table {
 }
 
 function factsTable(caseDigest: CaseDigest): Table {
-  const facts: Paragraph[] = listParagraphs(caseDigest.facts.petition, false, JUSTIFIED_CELL_TEXT);
-  if (caseDigest.facts.respondent_version !== undefined) {
+  const factsNode = caseDigest.facts;
+  const facts: Paragraph[] = listParagraphs(factsNode?.petition, false, JUSTIFIED_CELL_TEXT);
+  if (factsNode?.respondent_version !== undefined) {
     facts.push(subheading("Respondent\u2019s version", true));
-    facts.push(...listParagraphs(caseDigest.facts.respondent_version, false, JUSTIFIED_CELL_TEXT));
+    facts.push(...listParagraphs(factsNode.respondent_version, false, JUSTIFIED_CELL_TEXT));
   }
-  if (caseDigest.facts.petitioner_version !== undefined) {
+  if (factsNode?.petitioner_version !== undefined) {
     facts.push(subheading("Petitioners\u2019 version", true));
-    facts.push(...listParagraphs(caseDigest.facts.petitioner_version, false, JUSTIFIED_CELL_TEXT));
+    facts.push(...listParagraphs(factsNode.petitioner_version, false, JUSTIFIED_CELL_TEXT));
   }
 
   return table([
@@ -511,7 +523,7 @@ function normalizeIssue(issue: CaseDigestIssueInput): CaseDigestIssue {
 function issueTable(caseDigest: CaseDigest): Table {
   const rows: TableRow[] = [row([headingCell("Issue/s", 2, ISSUE_CELL_MARGINS)], 400)];
 
-  for (const issueInput of caseDigest.issues) {
+  for (const issueInput of caseDigest.issues ?? []) {
     const issue = normalizeIssue(issueInput);
     if (issue.issue) {
       rows.push(row([
@@ -604,8 +616,8 @@ export function createCaseDigestDocument(
 
   return new Document({
     creator: options.creator ?? "Digest Me",
-    title: caseDigest.case_title,
-    subject: caseDigest.subject,
+    title: caseDigest.case_title ?? "Case Digest",
+    subject: caseDigest.subject ?? "",
     keywords: "case digest",
     sections: [section],
   });
@@ -628,7 +640,7 @@ export function caseDigestJsonToDocx(
 }
 
 /** Return the stable download name used for a generated case-digest document. */
-export function caseDigestFileName(caseTitle: string): string {
+export function caseDigestFileName(caseTitle = ""): string {
   const slug = caseTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")

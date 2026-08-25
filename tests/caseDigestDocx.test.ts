@@ -66,7 +66,7 @@ describe("parseCaseDigestJson", () => {
 
     expect(digest.case_title).toBe("Villanueva v. Bayside Port Workers Cooperative");
     expect(digest.petitioner).toBe("Ramon Villanueva, Jr.");
-    expect(digest.facts.petition).toHaveLength(4);
+    expect(digest.facts?.petition).toHaveLength(4);
     expect(digest.issues).toHaveLength(4);
     expect(digest.class_notes).toHaveLength(2);
   });
@@ -90,7 +90,7 @@ describe("parseCaseDigestJson", () => {
     const digest = buildCaseDigest({
       facts: buildFacts({ respondent_version: ["Their version."] }),
     });
-    expect(parseCaseDigestJson(wire(digest)).facts.respondent_version).toEqual(["Their version."]);
+    expect(parseCaseDigestJson(wire(digest)).facts?.respondent_version).toEqual(["Their version."]);
   });
 
   it("accepts null optional fields emitted by Pydantic", () => {
@@ -107,6 +107,23 @@ describe("parseCaseDigestJson", () => {
     expect(parsed.issues).toEqual([{ ruling: "YES", ratio: "Because." }]);
   });
 
+  it("accepts a digest with unsupported elements missing", () => {
+    const digest: Record<string, WireValue> = JSON.parse(JSON.stringify(buildCaseDigest()));
+    delete digest.summary;
+    digest.facts = { petition: null };
+    digest.issues = null;
+
+    const parsed = parseCaseDigestJson(digest);
+    expect(parsed.summary).toBeUndefined();
+    expect(parsed.facts).toEqual({});
+    expect(parsed.issues).toBeUndefined();
+  });
+
+  it("drops unknown keys instead of persisting them", () => {
+    const digest = wire({ ...buildCaseDigest(), headnotes: "not a model key" });
+    expect(parseCaseDigestJson(digest)).toEqual(buildCaseDigest());
+  });
+
   it("throws when the input is not an object", () => {
     expect(() => parseCaseDigestJson(null)).toThrow("Expected case-digest JSON to be an object.");
   });
@@ -115,14 +132,11 @@ describe("parseCaseDigestJson", () => {
     expect(() => parseCaseDigestJson("{not json")).toThrow(SyntaxError);
   });
 
-  it.each(["case_title", "petitioner", "respondent", "subject", "ponente", "gr_no_date"])(
-    "throws with a field path when %s is missing",
-    (field) => {
-      const digest: Record<string, WireValue> = JSON.parse(JSON.stringify(buildCaseDigest()));
-      delete digest[field];
-      expect(() => parseCaseDigestJson(digest)).toThrow(`Expected ${field} to be a string.`);
-    },
-  );
+  it("accepts a completely empty digest", () => {
+    const parsed = parseCaseDigestJson({});
+    expect(parsed.case_title).toBeUndefined();
+    expect(parsed.facts).toEqual({});
+  });
 
   it("throws when a required field has the wrong type", () => {
     const digest = wire({ ...buildCaseDigest(), petitioner: 42 });
@@ -153,9 +167,16 @@ describe("parseCaseDigestJson", () => {
     );
   });
 
-  it("throws when an issue object is missing its ruling", () => {
+  it("accepts an issue object missing its ruling", () => {
     const issueWithoutRuling: CaseDigestIssueInput = JSON.parse(JSON.stringify({ ratio: "Because." }));
-    expect(() => parseCaseDigestJson(wire(buildCaseDigest({ issues: [issueWithoutRuling] })))).toThrow(
+    expect(parseCaseDigestJson(wire(buildCaseDigest({ issues: [issueWithoutRuling] }))).issues).toEqual([
+      { ratio: "Because." },
+    ]);
+  });
+
+  it("throws when an issue field has the wrong type", () => {
+    const issueWithBadRuling: CaseDigestIssueInput = JSON.parse(JSON.stringify({ ruling: 42, ratio: "Because." }));
+    expect(() => parseCaseDigestJson(wire(buildCaseDigest({ issues: [issueWithBadRuling] })))).toThrow(
       "Expected issues[0].ruling to be a string.",
     );
   });
@@ -164,6 +185,13 @@ describe("parseCaseDigestJson", () => {
 describe("createCaseDigestDocument", () => {
   it("renders every section of the digest template", async () => {
     const { document } = await unzipDocument(createCaseDigestDocument(CASE_DIGEST_MOCK));
+    for (const heading of SECTION_HEADINGS) {
+      expect(document).toContain(heading);
+    }
+  });
+
+  it("renders a minimal digest with missing elements without crashing", async () => {
+    const { document } = await unzipDocument(createCaseDigestDocument(parseCaseDigestJson({})));
     for (const heading of SECTION_HEADINGS) {
       expect(document).toContain(heading);
     }
