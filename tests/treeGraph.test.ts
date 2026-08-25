@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Graph from "graphology";
-import { NODE_COLORS, pathToNode, treeToGraph } from "../src/graph/treeGraph";
+import { NODE_COLORS, pathToNode, pathsToNodes, treeToGraph } from "../src/graph/treeGraph";
 import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
 function sampleTree() {
@@ -85,5 +85,36 @@ describe("pathToNode", () => {
 
   it("returns null for ids outside the tree", () => {
     expect(pathToNode(sampleTree(), "missing")).toBeNull();
+  });
+});
+
+describe("pathsToNodes", () => {
+  it("unions the root-to-node chains of every requested id", () => {
+    const root = sampleTree();
+
+    expect(pathsToNodes(root, ["b1", "b3"])).toEqual(new Set(["n0", "s1", "b1", "s2", "b3"]));
+  });
+
+  it("deduplicates overlapping chains", () => {
+    const root = sampleTree();
+
+    expect(pathsToNodes(root, ["b1", "b2"])).toEqual(new Set(["n0", "s1", "b1", "b2"]));
+  });
+
+  it("keeps only the document root when the root itself is requested", () => {
+    expect(pathsToNodes(sampleTree(), ["n0"])).toEqual(new Set(["n0"]));
+  });
+
+  it("skips ids outside the tree", () => {
+    const root = sampleTree();
+
+    expect(pathsToNodes(root, ["b1", "missing"])).toEqual(new Set(["n0", "s1", "b1"]));
+  });
+
+  it("returns an empty set for no ids or no valid ids", () => {
+    const root = sampleTree();
+
+    expect(pathsToNodes(root, [])).toEqual(new Set());
+    expect(pathsToNodes(root, ["missing"])).toEqual(new Set());
   });
 });

@@ -91,6 +91,7 @@ export default function DigestPage({
   const [isSessionReady, setIsSessionReady] = useState(() => documentId === null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; nonce: number } | null>(null);
+  const [traceRequest, setTraceRequest] = useState<{ nodeIds: string[]; nonce: number } | null>(null);
   const [status, setStatus] = useState<DigestStatus>("idle");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>(() => queuePosition === undefined ? "idle" : "queued");
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage()]);
@@ -125,6 +126,16 @@ export default function DigestPage({
 
   const pushMessage = useCallback((message: ChatMessage): void => {
     setMessages((previous) => [...previous, message]);
+  }, []);
+
+  /**
+   * Switch the graph into path-tracer mode for a response's references:
+   * trace every cited section's root→node path and recenter on it.
+   */
+  const triggerPathTrace = useCallback((refs: RetrievalHit[]): void => {
+    if (!refs.length) return;
+    setSelectedNodeId(null);
+    setTraceRequest({ nodeIds: refs.map((ref) => ref.nodeId), nonce: Date.now() });
   }, []);
 
   const clearDocxAssets = useCallback((): void => {
@@ -338,6 +349,7 @@ export default function DigestPage({
         setSelectedFile(source.file);
         setSelectedNodeId(null);
         setFocusRequest(null);
+        setTraceRequest(null);
         setStatus("idle");
         setDraft("");
         setPreview(null);
@@ -441,6 +453,7 @@ export default function DigestPage({
       setSessionDocumentId(parsed.id);
       setSelectedNodeId(null);
       setFocusRequest(null);
+      setTraceRequest(null);
       setStatus("idle");
       setIsSessionReady(true);
       setMessages([...messagesRef.current.filter((message) => message.kind !== "agent-stream"), ...additions]);
@@ -485,6 +498,7 @@ export default function DigestPage({
     const selectedDocument = selected;
 
     setDraft("");
+    setTraceRequest(null);
     pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: question });
 
     if (!selectedDocument) {
@@ -513,15 +527,75 @@ export default function DigestPage({
       },
     };
 
+    if (isDigestCommand(question)) {
+      if (!credentials) {
+        pushError("Save an OpenRouter model and API key in Settings before running /digest.");
+        return;
+      }
+
+      setAgentStatus("running");
+      let completed = false;
+      try {
+        const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
+        if (requestId !== agentRequestRef.current) return;
+
+        const markdown = caseDigestToMarkdown(result.digest);
+        const docxBlob = await renderCaseDigestDocx(result.digest);
+        if (requestId !== agentRequestRef.current) return;
+        const docxUrl = URL.createObjectURL(docxBlob);
+        const messageId = makeMessageId();
+        const docxFileId = `${sessionIdRef.current}-${messageId}`;
+        const docxFileName = caseDigestFileName(result.digest.case_title);
+        docxUrlsRef.current.add(docxUrl);
+        digestFilesRef.current.set(docxFileId, {
+          id: docxFileId,
+          sessionId,
+          fileName: docxFileName,
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          blob: docxBlob,
+        });
+        const refs = mapAgentReferences(selectedDocument.root, result.references);
+        pushMessage({
+          id: messageId,
+          at: new Date().toISOString(),
+          role: "assistant",
+          kind: "digest",
+          markdown,
+          digest: result.digest,
+          refs,
+          execution: { model: result.model, elapsedMs: result.elapsedMs },
+          docxUrl,
+          docxFileName,
+          docxFileId,
+          docxBlob,
+        });
+        triggerPathTrace(refs);
+        completed = true;
+      } catch (error) {
+        if (requestId === agentRequestRef.current) {
+          pushError(error instanceof Error ? error.message : "The case digest agent could not complete that request.");
+          setAgentStatus("failed");
+        }
+      } finally {
+        if (requestId === agentRequestRef.current) {
+          activeAgentRequestIdRef.current = null;
+          if (completed) setAgentStatus("idle");
+        }
+      }
+      return;
+    }
+
     if (!credentials) {
+      const refs = retrieveNodes(selectedDocument.root, question, 3);
       pushMessage({
         id: makeMessageId(),
         at: new Date().toISOString(),
         role: "assistant",
         kind: "references",
         query: question,
-        refs: retrieveNodes(selectedDocument.root, question, 3),
+        refs,
       });
+      triggerPathTrace(refs);
       return;
     }
 
@@ -564,17 +638,19 @@ export default function DigestPage({
         startedAt: result.startedAt ?? streamStartedAt,
         endedAt: result.endedAt ?? Date.now(),
       };
+      const refs = referencesForAnswer(selectedDocument.root, result.references, question);
       setMessages((previous) => previous.map((message) => {
         if (message.id !== streamMessageId || message.kind !== "agent-stream") return message;
         return {
           ...message,
           kind: "agent-answer" as const,
           markdown: result.markdown,
-          refs: referencesForAnswer(selectedDocument.root, result.references, question),
+          refs,
           execution,
           assistant: latestAssistant,
         };
       }));
+      triggerPathTrace(refs);
       activeStreamMessageRef.current = null;
       completed = true;
     } catch (error) {
@@ -582,14 +658,16 @@ export default function DigestPage({
       activeStreamMessageRef.current = null;
       setMessages((previous) => previous.filter((message) => message.id !== streamMessageId));
       pushError(error instanceof Error ? `Agent unavailable. ${error.message} Showing local matches instead.` : "Agent unavailable. Showing local matches instead.");
+      const refs = retrieveNodes(selectedDocument.root, question, 3);
       pushMessage({
         id: makeMessageId(),
         at: new Date().toISOString(),
         role: "assistant",
         kind: "references",
         query: question,
-        refs: retrieveNodes(selectedDocument.root, question, 3),
+        refs,
       });
+      triggerPathTrace(refs);
       setAgentStatus("failed");
     } finally {
       if (activeStreamMessageRef.current === streamMessageId) activeStreamMessageRef.current = null;
@@ -628,9 +706,9 @@ export default function DigestPage({
     setPreview({ blob: message.docxBlob, fileName: message.docxFileName, downloadUrl: message.docxUrl });
   }
 
-  function handleGraphNodeSelect(node: { id: string }): void {
+  const handleGraphNodeSelect = useCallback((node: { id: string }): void => {
     setSelectedNodeId(node.id);
-  }
+  }, []);
 
   const isBusy = status === "parsing" || agentStatus === "queued" || agentStatus === "running";
 
@@ -742,6 +820,7 @@ export default function DigestPage({
               focusRequest={focusRequest}
               onSelectNode={handleGraphNodeSelect}
               selectedNodeId={selectedNodeId}
+              traceRequest={traceRequest}
               tree={selected.root}
             />
           </div>
