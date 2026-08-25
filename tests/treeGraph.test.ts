@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Graph from "graphology";
-import { EDGE_TRACE, NODE_COLORS, pathToNode, pathsToNodes, treeToGraph } from "../src/graph/treeGraph";
+import { NODE_COLORS, pathToNode, pathsToNodes, treeToGraph } from "../src/graph/treeGraph";
 import { buildBlock, buildDocumentNode, buildSection } from "./factories";
 
 function sampleTree() {
@@ -116,11 +116,5 @@ describe("pathsToNodes", () => {
 
     expect(pathsToNodes(root, [])).toEqual(new Set());
     expect(pathsToNodes(root, ["missing"])).toEqual(new Set());
-  });
-});
-
-describe("EDGE_TRACE", () => {
-  it("declares the directional arrow program for traced edges", () => {
-    expect(EDGE_TRACE.type).toBe("arrow");
   });
 });

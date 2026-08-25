@@ -25,8 +25,6 @@ export const EDGE_BASE = {
 export const EDGE_TRACE = {
   color: "#e03131",
   size: 2.6,
-  /** Sigma edge program: draws the arrowhead at the target (child) end. */
-  type: "arrow",
 } as const;
 
 /** Dimmed state for edges outside an active trace. */

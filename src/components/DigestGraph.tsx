@@ -181,7 +181,7 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
       labelDensity: 0.9,
       labelGridCellSize: 90,
       labelRenderedSizeThreshold: 8,
-      defaultEdgeType: "line",
+      defaultEdgeType: "arrow",
       renderLabels: true,
       stagePadding: 60,
     });
@@ -276,7 +276,8 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
 
   // Context trace: the response's path tracer (all cited nodes) or a single
   // selected node activates its root→node path while the remaining edges
-  // recede. Traced edges turn signal red with a directional arrowhead.
+  // recede. Traced edges turn signal red; the renderer's defaultEdgeType
+  // keeps directional arrowheads on every parent→child edge.
   useEffect(() => {
     const targetIds = traceRequest ? traceRequest.nodeIds : selectedNodeId ? [selectedNodeId] : [];
     const tracing = targetIds.length > 0;
@@ -297,49 +298,24 @@ export default function DigestGraph({ tree, className, onSelectNode, focusReques
   const focusNode = useCallback((nodeId: string): void => {
     const renderer = sigmaRef.current;
     if (!renderer) return;
-    const display = renderer.getNodeDisplayData(nodeId);
-    if (!display) return;
+    const target = cameraFitForNodes(renderer, graph, [nodeId]);
+    if (!target) return;
+    const { x, y } = target;
     renderer.getCamera().animate(
-      { x: display.x, y: display.y, ratio: Math.max(renderer.getCamera().getState().ratio, 0.4) },
+      { x, y, ratio: Math.max(renderer.getCamera().getState().ratio, 0.4) },
       { duration: 320 },
     );
-  }, []);
+  }, [graph]);
 
   // Frame the traced path: center the camera on the union of the response
   // references' root→node paths and zoom so the whole region stays in view.
   const focusNodes = useCallback((nodeIds: string[]): void => {
     const renderer = sigmaRef.current;
     if (!renderer) return;
-
-    const displays = nodeIds
-      .map((nodeId) => renderer.getNodeDisplayData(nodeId))
-      .filter((display): display is NonNullable<typeof display> => display !== undefined);
-    if (!displays.length) return;
-
-    const xs = displays.map((display) => display.x);
-    const ys = displays.map((display) => display.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-
-    const width = Math.max(maxX - minX, 1);
-    const height = Math.max(maxY - minY, 1);
-    const { width: viewportWidth, height: viewportHeight } = renderer.getGraphDimensions();
-    const ratio = Math.min(
-      (viewportWidth * (1 - FOCUS_PADDING * 2)) / width,
-      (viewportHeight * (1 - FOCUS_PADDING * 2)) / height,
-    );
-
-    renderer.getCamera().animate(
-      {
-        x: (minX + maxX) / 2,
-        y: (minY + maxY) / 2,
-        ratio: Math.min(Math.max(ratio, MIN_CAMERA_RATIO), MAX_CAMERA_RATIO),
-      },
-      { duration: 320 },
-    );
-  }, []);
+    const target = cameraFitForNodes(renderer, graph, nodeIds);
+    if (!target) return;
+    renderer.getCamera().animate({ ...target }, { duration: 320 });
+  }, [graph]);
 
   // Chat-driven focus: pan to the node a reference card points at.
   useEffect(() => {
