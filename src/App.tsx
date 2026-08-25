@@ -162,7 +162,7 @@ export default function App() {
         setOpenPanel(null);
         return;
       }
-      const shouldQueueDigests = pdfs.length > 1;
+      const shouldQueueDigests = files.length > 1;
       const tabDrafts = pdfs.map((file) => newDigestTab(file));
       const queueItems = shouldQueueDigests
         ? digestQueueRef.current.enqueue(tabDrafts.map((tab) => tab.id))
