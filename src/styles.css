@@ -224,6 +224,35 @@ input:focus-visible,
   font-size: 8px;
 }
 
+.session-sub-mark {
+  position: relative;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: visible !important;
+}
+
+.session-sub-complete,
+.session-sub-failed {
+  position: absolute;
+  right: -3px;
+  bottom: -1px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--paper-bright);
+  border-radius: 50%;
+}
+
+.session-sub-complete {
+  background: #5d9a68;
+}
+
+.session-sub-failed {
+  background: var(--peach);
+}
+
 .session-history-toggle {
   margin-top: 3px;
   border-top: 1px solid var(--line);
@@ -2876,6 +2905,11 @@ input:focus-visible,
   background: var(--lime-dark);
   box-shadow: 0 0 0 3px rgba(184, 216, 86, 0.18);
   animation: agent-pulse 900ms ease-in-out infinite alternate;
+}
+
+.digest-tab-status.is-complete {
+  background: #5d9a68;
+  box-shadow: 0 0 0 3px rgba(93, 154, 104, 0.13);
 }
 
 .digest-tab-status.is-failed {

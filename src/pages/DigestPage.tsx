@@ -31,7 +31,7 @@ const PdfReferenceViewer = lazy(() => import("../components/PdfReferenceViewer")
 const DocxPreviewModal = lazy(() => import("../components/DocxPreviewModal"));
 
 type DigestStatus = "idle" | "parsing" | "error";
-type AgentStatus = "idle" | "running" | "failed";
+type AgentStatus = "idle" | "running" | "complete" | "failed";
 
 function makeMessageId(): string {
   const randomId = globalThis.crypto?.randomUUID?.();
@@ -114,6 +114,7 @@ export default function DigestPage({
   const onStatusChangeRef = useRef(onStatusChange);
   const pendingFileConsumedRef = useRef(false);
   const autoRunConsumedRef = useRef(false);
+  const digestReadyRef = useRef(false);
 
   const selectedNode: DocumentNode | null = useMemo(() => {
     if (!selected || !selectedNodeId) return null;
@@ -164,10 +165,12 @@ export default function DigestPage({
   /** Connect to the agent and compose the structured case digest for a parsed document. */
   const runCaseDigest = useCallback(async (selectedDocument: ParsedDocument): Promise<void> => {
     const requestId = ++agentRequestRef.current;
+    setAgentStatus("running");
     const credentials = await getAgentRuntimeCredentials().catch(() => null);
     if (requestId !== agentRequestRef.current) return;
     if (!credentials) {
       pushError("Save an OpenRouter model and API key in Settings before running /digest.");
+      setAgentStatus("failed");
       return;
     }
 
@@ -181,7 +184,6 @@ export default function DigestPage({
       },
     };
 
-    setAgentStatus("running");
     let completed = false;
     try {
       const result = await runCaseDigestAgent(selectedDocument.root, credentials, requestOptions);
@@ -216,6 +218,7 @@ export default function DigestPage({
         docxFileId,
         docxBlob,
       });
+      digestReadyRef.current = true;
       completed = true;
     } catch (error) {
       if (requestId === agentRequestRef.current) {
@@ -225,7 +228,7 @@ export default function DigestPage({
     } finally {
       if (requestId === agentRequestRef.current) {
         activeAgentRequestIdRef.current = null;
-        if (completed) setAgentStatus("idle");
+        if (completed) setAgentStatus("complete");
       }
     }
   }, [pushError, pushMessage]);
@@ -241,7 +244,7 @@ export default function DigestPage({
       setMessages((previous) => previous.filter((message) => message.id !== streamMessageId));
     }
     if (removeStreamMessage) {
-      setAgentStatus("idle");
+      setAgentStatus(digestReadyRef.current ? "complete" : "idle");
     }
   }, []);
 
@@ -319,6 +322,7 @@ export default function DigestPage({
           docxUrlsRef.current.add(docxUrl);
           return { ...message, docxBlob: asset.blob, docxUrl };
         });
+        const digestReady = restoredMessages.some((message) => message.kind === "digest");
         const restoredSessionId = thread?.threadId ?? storedSession?.session.id ?? makeSessionId();
         setSessionId(restoredSessionId);
         sessionIdRef.current = restoredSessionId;
@@ -333,9 +337,10 @@ export default function DigestPage({
         setDraft("");
         setPreview(null);
         setMessages(restoredMessages);
-        setAgentStatus("idle");
+        digestReadyRef.current = digestReady;
+        setAgentStatus(digestReady ? "complete" : "idle");
         lastPersistedFingerprintRef.current = "";
-        if (autoRunDigest && !autoRunConsumedRef.current) {
+        if (autoRunDigest && !digestReady && !autoRunConsumedRef.current) {
           autoRunConsumedRef.current = true;
           pushMessage({ id: makeMessageId(), at: new Date().toISOString(), role: "user", kind: "question", text: "/digest" });
           void runCaseDigest(source.document);
@@ -380,6 +385,8 @@ export default function DigestPage({
       return;
     }
 
+    digestReadyRef.current = false;
+    setAgentStatus("idle");
     const requestId = ++agentRequestRef.current;
     setStatus("parsing");
     try {
@@ -578,7 +585,7 @@ export default function DigestPage({
       if (activeStreamMessageRef.current === streamMessageId) activeStreamMessageRef.current = null;
       if (requestId === agentRequestRef.current) {
         activeAgentRequestIdRef.current = null;
-        if (completed) setAgentStatus("idle");
+        if (completed) setAgentStatus(digestReadyRef.current ? "complete" : "idle");
       }
     }
   }
@@ -596,7 +603,7 @@ export default function DigestPage({
 
   /** Reset the engine after it crashed so the next request starts fresh. */
   function handleReloadAgent(): void {
-    setAgentStatus("idle");
+    setAgentStatus(digestReadyRef.current ? "complete" : "idle");
     disposeEngine();
   }
 

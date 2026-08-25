@@ -45,7 +45,7 @@ interface DigestTab {
   pendingFile?: File | null;
 }
 
-type DigestTabStatus = "idle" | "running" | "failed";
+type DigestTabStatus = "idle" | "running" | "complete" | "failed";
 
 const EMPTY_STATS: SessionStats = { reviewed: 0, known: 0, hard: 0, again: 0 };
 
@@ -216,12 +216,13 @@ export default function App() {
   const currentCard = activeDeck?.cards.find((card) => card.id === currentCardId);
   const totalCards = decks.reduce((sum, deck) => sum + deck.cards.length, 0);
   const progress = isComplete || !studyOrder.length ? (isComplete ? 100 : 0) : (currentIndex / studyOrder.length) * 100;
-  const runningDocumentIds = useMemo(() => {
-    const ids = new Set<string>();
+  const documentStatuses = useMemo(() => {
+    const statuses = new Map<string, DigestTabStatus>();
     for (const tab of digestTabs) {
-      if (tab.documentId && digestTabStatuses[tab.id] === "running") ids.add(tab.documentId);
+      const status = tab.documentId ? digestTabStatuses[tab.id] : undefined;
+      if (tab.documentId && status && status !== "idle") statuses.set(tab.documentId, status);
     }
-    return ids;
+    return statuses;
   }, [digestTabs, digestTabStatuses]);
 
   useEffect(() => {
@@ -535,7 +536,7 @@ export default function App() {
         onToggleCollapse={toggleRail}
         onTogglePanel={togglePanel}
         openPanel={openPanel}
-        runningDocumentIds={runningDocumentIds}
+        documentStatuses={documentStatuses}
         view={view}
       />
 
@@ -738,8 +739,8 @@ interface SidebarProps {
   collapsed: boolean;
   decks: Deck[];
   documents: DocumentSummary[];
+  documentStatuses: ReadonlyMap<string, DigestTabStatus>;
   openPanel: "sessions" | "decks" | null;
-  runningDocumentIds: Set<string>;
   view: AppView;
   onSetView: (view: AppView) => void;
   onToggleCollapse: () => void;
@@ -757,6 +758,7 @@ function Sidebar({
   activeDeckId,
   collapsed,
   decks,
+  documentStatuses,
   documents,
   onDeleteDeck,
   onImport,
@@ -768,7 +770,6 @@ function Sidebar({
   onToggleCollapse,
   onTogglePanel,
   openPanel,
-  runningDocumentIds,
   view,
 }: SidebarProps) {
   const [isMultiFileDrop, setIsMultiFileDrop] = useState(false);
@@ -842,18 +843,33 @@ function Sidebar({
           <div className="sub-panel session-sub-panel">
             {documents.length ? (
               <div className="session-history-list">
-                {documents.map((document) => (
-                  <div className={`sub-row session-sub-row ${activeDocumentId === document.id ? "active" : ""}`} key={document.id}>
-                    <button className="sub-item session-sub-item" onClick={() => onOpenDocument(document.id)} type="button">
-                      {runningDocumentIds.has(document.id) ? (
-                        <span aria-label="Digest agent connected and running" className="agent-spin session-sub-spin" role="status" />
-                      ) : (
-                        <Icon name="tree" size={13} />
-                      )}
-                      <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages</small></span>
-                    </button>
-                  </div>
-                ))}
+                {documents.map((document) => {
+                  const status = documentStatuses.get(document.id) ?? "idle";
+                  const statusLabel = status === "running"
+                    ? "Digest agent connected and running"
+                    : status === "complete"
+                      ? "Digest complete and ready to view"
+                      : status === "failed"
+                        ? "Digest agent stopped unexpectedly"
+                        : undefined;
+                  return (
+                    <div className={`sub-row session-sub-row ${activeDocumentId === document.id ? "active" : ""}`} key={document.id}>
+                      <button className="sub-item session-sub-item" onClick={() => onOpenDocument(document.id)} type="button">
+                        <span
+                          aria-label={statusLabel}
+                          className={`session-sub-mark is-${status}`}
+                          role={statusLabel ? "status" : undefined}
+                          title={statusLabel}
+                        >
+                          {status === "running" ? <span aria-hidden="true" className="agent-spin session-sub-spin" /> : <Icon name="tree" size={13} />}
+                          {status === "complete" && <span aria-hidden="true" className="session-sub-complete" />}
+                          {status === "failed" && <span aria-hidden="true" className="session-sub-failed" />}
+                        </span>
+                        <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages</small></span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="sub-empty">No documents yet.</p>
