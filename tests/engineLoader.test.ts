@@ -137,6 +137,25 @@ describe("engineLoader request timers", () => {
     expect(secondUpdates.at(-1)).toBe("second");
   });
 
+  it("reports queued work before the worker acknowledges execution", async () => {
+    const states: string[] = [];
+    const run = runChatAgent(ROOT, "show request state", CREDENTIALS, {
+      onRequestState: (state) => states.push(state),
+    });
+    const worker = lastWorker();
+    const requestId = postedRequestId(worker);
+
+    expect(states).toEqual(["queued"]);
+    await bootEngine(worker);
+    expect(states).toEqual(["queued"]);
+
+    worker.emit({ type: "started", requestId });
+    expect(states).toEqual(["queued", "running"]);
+    worker.emit({ type: "result", requestId, result: CHAT_RESULT });
+
+    await expect(run).resolves.toMatchObject({ markdown: "# Held: affirmed" });
+  });
+
   it("cancels one request promptly without terminating the shared worker", async () => {
     let requestId = 0;
     const run = runChatAgent(ROOT, "cancel me", CREDENTIALS, { onRequestId: (id) => { requestId = id; } });
