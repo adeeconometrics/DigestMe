@@ -24,6 +24,18 @@ const CHAT_STORE = "chats";
 const DIGEST_FILE_STORE = "digestFiles";
 const STARTER_SEEDED_KEY = "starter-seeded";
 
+/**
+ * Documents awaiting their cascade delete. An in-flight snapshot persist from
+ * an unmounting digest tab must not resurrect a session the user just deleted,
+ * so `putDigestSession` skips any document marked here until the delete lands.
+ */
+const deletedDocumentIds = new Set<string>();
+
+/** Marks a document so pending session persists will skip it. */
+export function markDocumentDeleted(documentId: string): void {
+  deletedDocumentIds.add(documentId);
+}
+
 function legacyDigestSession(document: ParsedDocument): DigestSession {
   const at = document.parsedAt;
   const messages: PersistedChatMessage[] = [
@@ -377,6 +389,7 @@ export async function putDigestSession(
   source?: DocumentWithSource,
   digestFiles?: StoredDigestFile[],
 ): Promise<void> {
+  if (session.documentId !== null && deletedDocumentIds.has(session.documentId)) return;
   if (source && source.document.id !== session.documentId) {
     throw new Error("A digest session source must match its document reference.");
   }
@@ -448,6 +461,58 @@ export async function removeDigestSession(sessionId: string): Promise<void> {
       const cursor = cursorRequest.result;
       if (!cursor) return;
       cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
+/**
+ * Removes a document and everything that references it in one transaction:
+ * its PDF source, chat threads, digest session, and the session's DOCX assets.
+ * Clears the deletion mark once the cascade has landed.
+ */
+export async function removeDocumentWithSessions(documentId: string): Promise<void> {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(
+      [CHAT_SESSION_STORE, CHAT_STORE, DOCUMENT_STORE, DOCUMENT_FILE_STORE, DIGEST_FILE_STORE],
+      "readwrite",
+    );
+    transaction.oncomplete = () => {
+      deletedDocumentIds.delete(documentId);
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction was aborted."));
+
+    transaction.objectStore(DOCUMENT_STORE).delete(documentId);
+    transaction.objectStore(DOCUMENT_FILE_STORE).delete(documentId);
+
+    const chats = transaction.objectStore(CHAT_STORE);
+    const chatRequest = chats.index("documentId").openCursor(IDBKeyRange.only(documentId));
+    chatRequest.onsuccess = () => {
+      const cursor = chatRequest.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+
+    const sessions = transaction.objectStore(CHAT_SESSION_STORE);
+    const sessionRequest = sessions.index("documentId").openCursor(IDBKeyRange.only(documentId));
+    sessionRequest.onsuccess = () => {
+      const cursor = sessionRequest.result;
+      if (!cursor) return;
+      // SAFETY: chatSessions is only written with the DigestSession shape by this module.
+      const session = cursor.value as DigestSession;
+      sessions.delete(session.id);
+      const digestStore = transaction.objectStore(DIGEST_FILE_STORE);
+      const fileRequest = digestStore.index("sessionId").openCursor(IDBKeyRange.only(session.id));
+      fileRequest.onsuccess = () => {
+        const fileCursor = fileRequest.result;
+        if (!fileCursor) return;
+        fileCursor.delete();
+        fileCursor.continue();
+      };
       cursor.continue();
     };
   });

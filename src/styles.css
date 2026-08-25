@@ -203,6 +203,34 @@ input:focus-visible,
   align-items: flex-start;
 }
 
+.session-sub-row {
+  position: relative;
+}
+
+.session-sub-row .session-sub-item {
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.session-sub-row:hover .session-sub-item,
+.session-sub-row:focus-within .session-sub-item {
+  transform: translateX(-8px);
+}
+
+.session-sub-row .session-sub-remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  margin: 0;
+  transform: translate(8px, -50%);
+  transition: opacity 160ms ease, color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.session-sub-row:hover .session-sub-remove,
+.session-sub-row:focus-within .session-sub-remove {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
 .session-sub-copy {
   display: grid;
   min-width: 0;
@@ -3591,43 +3619,47 @@ input:focus-visible,
 }
 
 .loader {
-  --loader-color: var(--ink);
-  --c: var(--loader-color) 90%, #0000;
   display: block;
-  width: 30px;
-  aspect-ratio: 4;
+  width: 65px;
+  aspect-ratio: 65 / 30;
+  position: relative;
   flex: 0 0 auto;
-  background:
-    radial-gradient(circle closest-side at left 6px top 50%, var(--c)),
-    radial-gradient(circle closest-side, var(--c)),
-    radial-gradient(circle closest-side at right 6px top 50%, var(--c));
-  background-size: 100% 100%;
-  background-repeat: no-repeat;
-  animation: l4 1s infinite alternate;
+}
+
+.loader:before {
+  content: "";
+  position: absolute;
+  border-radius: 50px;
+  box-shadow: 0 0 0 3px inset #000;
+  animation: l3 0.75s infinite alternate;
 }
 
 .agent-queue-loader {
   width: 30px;
-  --loader-color: var(--ink-soft);
 }
 
 .digest-tab-loader {
   width: 20px;
-  --loader-color: var(--lime-dark);
 }
 
 .session-sub-loader {
   width: 15px;
-  --loader-color: var(--ink-soft);
 }
 
 .chat-avatar-loader {
   width: 20px;
-  --loader-color: var(--ink);
 }
 
-@keyframes l4 {
-  to { width: 18px; aspect-ratio: 1; }
+@keyframes l3 {
+  0% {
+    inset: 0 53.85% 0 0;
+  }
+  50% {
+    inset: 0 0 0 0;
+  }
+  100% {
+    inset: 0 0 0 53.85%;
+  }
 }
 
 .agent-progress-dot {

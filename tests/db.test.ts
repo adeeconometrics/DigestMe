@@ -14,6 +14,7 @@ import {
   getDocumentWithSource,
   getDocuments,
   getSessions,
+  markDocumentDeleted,
   putDeck,
   putChatThread,
   putDigestSession,
@@ -23,6 +24,7 @@ import {
   removeChatThread,
   removeDigestSession,
   removeDocument,
+  removeDocumentWithSessions,
   removeSessionsForDeck,
 } from "../src/lib/db";
 import { STARTER_DECK } from "../src/data/starter";
@@ -299,6 +301,62 @@ describe("digest chat sessions", () => {
     expect(await getDigestSessionAssets(session.id)).toEqual([]);
     expect(await getDocument(document.id)).toBeUndefined();
     expect(await getDocumentFile(document.id)).toBeUndefined();
+  });
+
+  it("cascades every session, thread, PDF, and DOCX owned by a document", async () => {
+    const session = buildDigestSession({ documentId: "doc-cascade" });
+    const document = buildParsedDocument({ id: "doc-cascade" });
+    const digestFile = {
+      id: "docx-cascade-answer",
+      sessionId: session.id,
+      fileName: "case-digest.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      blob: new Blob([new Uint8Array([9, 9])]),
+    };
+    await putDigestSession(
+      session,
+      { document, file: { id: document.id, fileName: "case.pdf", mimeType: "application/pdf", blob: pdfFile() } },
+      [digestFile],
+    );
+
+    await removeDocumentWithSessions(document.id);
+
+    expect(await getDocument(document.id)).toBeUndefined();
+    expect(await getDocumentFile(document.id)).toBeUndefined();
+    expect(await getDigestSession(session.id)).toBeUndefined();
+    expect(await getDigestSessionAssets(session.id)).toEqual([]);
+    expect(await getChatThread(session.id)).toBeUndefined();
+    expect(await getChatThreadForDocument(document.id)).toBeUndefined();
+  });
+
+  it("skips pending session persists for a document marked for deletion", async () => {
+    const session = buildDigestSession({ documentId: "doc-marked" });
+    const document = buildParsedDocument({ id: "doc-marked" });
+
+    markDocumentDeleted(document.id);
+    await putDigestSession(
+      session,
+      { document, file: { id: document.id, fileName: "case.pdf", mimeType: "application/pdf", blob: pdfFile() } },
+    );
+    await removeDocumentWithSessions(document.id);
+
+    expect(await getDigestSession(session.id)).toBeUndefined();
+    expect(await getDocument(document.id)).toBeUndefined();
+  });
+
+  it("persists again normally after the deletion mark has cleared", async () => {
+    const session = buildDigestSession({ documentId: "doc-mark-cleared" });
+    const document = buildParsedDocument({ id: "doc-mark-cleared" });
+
+    markDocumentDeleted(document.id);
+    await removeDocumentWithSessions(document.id);
+    await putDigestSession(
+      session,
+      { document, file: { id: document.id, fileName: "case.pdf", mimeType: "application/pdf", blob: pdfFile() } },
+    );
+
+    expect(await getDigestSession(session.id)).toBeDefined();
+    expect(await getDocument(document.id)).toBeDefined();
   });
 });
 

@@ -4,7 +4,7 @@ import Icon from "./components/Icon";
 import { STARTER_DECK } from "./data/starter";
 import { deckNameFromFile, validateCsv } from "./lib/csv";
 import { createDigestQueue } from "./lib/digestQueue";
-import { getDecksWithStarter, getDocumentSummaries, getSessions, putDeck, putSession, removeDeck, removeSessionsForDeck } from "./lib/db";
+import { getDecksWithStarter, getDocumentSummaries, getSessions, markDocumentDeleted, putDeck, putSession, removeDeck, removeDocumentWithSessions, removeSessionsForDeck } from "./lib/db";
 import { isPdfFile } from "./parser";
 import type { AppView, CsvValidationResult, Deck, DocumentSummary, Flashcard, Rating, StudySession } from "./types";
 import { requestPersistentStorageOnGesture } from "./lib/storagePersistence";
@@ -451,6 +451,34 @@ export default function App() {
     setMobileMenuOpen(false);
   }
 
+  function deleteDocument(documentId: string) {
+    const document = documentSummaries.find((candidate) => candidate.id === documentId);
+    if (!document || !window.confirm(`Remove ${document.fileName} and its digest session?`)) return;
+
+    markDocumentDeleted(documentId);
+    const closedTabIds = digestTabs.filter((tab) => tab.documentId === documentId).map((tab) => tab.id);
+    for (const tabId of closedTabIds) digestQueueRef.current.remove(tabId);
+    setDocumentSummaries((previous) => previous.filter((candidate) => candidate.id !== documentId));
+    setDigestTabs((previous) => {
+      const remaining = previous.filter((tab) => tab.documentId !== documentId);
+      if (remaining.length > 0) {
+        if (closedTabIds.includes(activeDigestTabId)) setActiveDigestTabId(remaining[0].id);
+        return remaining;
+      }
+      const replacement = newDigestTab();
+      setActiveDigestTabId(replacement.id);
+      return [replacement];
+    });
+    setDigestTabStatuses((previous) => {
+      const next = { ...previous };
+      for (const tabId of closedTabIds) delete next[tabId];
+      return next;
+    });
+    void removeDocumentWithSessions(documentId)
+      .then(() => setToast(`${document.fileName} and its digest session were removed.`))
+      .catch(() => reportStorageFailure("The session was removed, but its data could not be fully cleared."));
+  }
+
   function deleteDeck(deckId: string) {
     const deck = decks.find((candidate) => candidate.id === deckId);
     if (!deck || !window.confirm(`Remove ${deck.name} from this session?`)) return;
@@ -560,6 +588,7 @@ export default function App() {
         onOpenDocument={openDocument}
         onOpenSettings={openSettings}
         onDeleteDeck={deleteDeck}
+        onDeleteDocument={deleteDocument}
         onSelectDeck={selectDeck}
         onSetView={(nextView) => setView(nextView)}
         onToggleCollapse={toggleRail}
@@ -797,6 +826,7 @@ interface SidebarProps {
   onSelectDeck: (deckId: string) => void;
   onImport: () => void;
   onDeleteDeck: (deckId: string) => void;
+  onDeleteDocument: (documentId: string) => void;
 }
 
 function Sidebar({
@@ -808,6 +838,7 @@ function Sidebar({
   documentStatuses,
   documents,
   onDeleteDeck,
+  onDeleteDocument,
   onImport,
   onNewSession,
   onOpenDocument,
@@ -916,6 +947,9 @@ function Sidebar({
                           {status === "failed" && <span aria-hidden="true" className="session-sub-failed" />}
                         </span>
                         <span className="session-sub-copy"><strong>{document.fileName}</strong><small>{formatDate(document.parsedAt)} · {document.pageCount} pages{queuePosition === undefined ? "" : ` · queue #${queuePosition}`}</small></span>
+                      </button>
+                      <button aria-label={`Remove ${document.fileName}`} className="sub-remove session-sub-remove" onClick={() => onDeleteDocument(document.id)} title={`Remove ${document.fileName}`} type="button">
+                        <Icon name="trash" size={12} />
                       </button>
                     </div>
                   );
