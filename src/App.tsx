@@ -140,8 +140,13 @@ export default function App() {
   }
 
   function openDocument(documentId: string): void {
-    setDigestTabs((previous) => previous.some((tab) => tab.documentId === documentId) ? previous : [...previous, { id: documentId, documentId }]);
-    setActiveDigestTabId(documentId);
+    const existingTab = digestTabs.find((tab) => tab.documentId === documentId);
+    if (existingTab) {
+      setActiveDigestTabId(existingTab.id);
+    } else {
+      setDigestTabs((previous) => [...previous, { id: documentId, documentId }]);
+      setActiveDigestTabId(documentId);
+    }
     setView("digest");
     setOpenPanel(null);
   }
@@ -155,7 +160,8 @@ export default function App() {
         setOpenPanel(null);
         return;
       }
-      const tabs = pdfs.map((file) => ({ ...newDigestTab(file), autoRunDigest: true }));
+      const autoRunDigest = files.length > 1;
+      const tabs = pdfs.map((file) => ({ ...newDigestTab(file), autoRunDigest }));
       setDigestTabs((previous) => [...previous, ...tabs]);
       setActiveDigestTabId(tabs[0].id);
       setView("digest");
@@ -192,8 +198,7 @@ export default function App() {
 
   const handleDocumentReady = useCallback((tabId: string, summary: DocumentSummary): void => {
     setDocumentSummaries((previous) => [summary, ...previous.filter((candidate) => candidate.id !== summary.id)]);
-    setDigestTabs((previous) => previous.map((tab) => tab.id === tabId ? { id: summary.id, documentId: summary.id, autoRunDigest: tab.autoRunDigest } : tab));
-    setActiveDigestTabId(summary.id);
+    setDigestTabs((previous) => previous.map((tab) => tab.id === tabId ? { ...tab, documentId: summary.id, pendingFile: undefined } : tab));
   }, []);
 
   const handleDigestTabStatus = useCallback((tabId: string, status: DigestTabStatus): void => {
@@ -769,9 +774,12 @@ function Sidebar({
   const [isMultiFileDrop, setIsMultiFileDrop] = useState(false);
 
   function handleNewSessionDragOver(event: DragEvent<HTMLElement>): void {
-    if (!event.dataTransfer.types.includes("Files")) return;
+    if (!event.dataTransfer.types.includes("Files")) {
+      setIsMultiFileDrop(false);
+      return;
+    }
     event.preventDefault();
-    setIsMultiFileDrop(event.dataTransfer.items.length > 1);
+    setIsMultiFileDrop(event.dataTransfer.items.length > 1 || event.dataTransfer.files.length > 1);
   }
 
   function handleNewSessionDragLeave(event: DragEvent<HTMLElement>): void {
@@ -856,10 +864,11 @@ function Sidebar({
               onDragLeave={handleNewSessionDragLeave}
               onDragOver={handleNewSessionDragOver}
               onDrop={handleNewSessionDrop}
+              onDragEnd={() => setIsMultiFileDrop(false)}
               type="button"
             >
               <Icon name={isMultiFileDrop ? "spark" : "plus"} size={13} />
-              <span>{isMultiFileDrop ? "DigestMe" : "Open document"}</span>
+              <span>{isMultiFileDrop ? "DigestMe" : "Open Document"}</span>
             </button>
           </div>
         )}
