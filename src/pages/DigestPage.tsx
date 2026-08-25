@@ -526,7 +526,6 @@ export default function DigestPage({
         if (requestId === agentRequestRef.current) setAgentStatus(nextState);
       },
     };
-    };
 
     if (isDigestCommand(question)) {
       if (!credentials) {
