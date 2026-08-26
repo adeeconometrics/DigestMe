@@ -1,0 +1,168 @@
+"""Per-case headless pipeline: pdf-inspector -> pydantic-agent -> tsx-docx.
+
+Stage 1 shells out to the pdf-inspector tsx script (WASM PDF -> markdown plus
+context tree), stage 2 runs the pydantic-agent digest in-process against that
+tree, and stage 3 shells out to the tsx-docx script (digest JSON -> .docx).
+Intermediates live under ``<outdir>/work/<case>/`` and the final document is
+written to ``<outdir>/<case>.docx``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import shutil
+import subprocess
+import time
+from collections.abc import Callable, Coroutine, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal
+
+from engine.bridge import run_case_digest
+from engine.schemas import CaseDigestResult
+
+from .config import Credentials
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TS_SCRIPT_DIR = Path(__file__).resolve().parent / "ts"
+PDF_INSPECTOR_SCRIPT = TS_SCRIPT_DIR / "pdf-inspector.ts"
+DOCX_SCRIPT = TS_SCRIPT_DIR / "docx.ts"
+
+DEFAULT_NODE_TIMEOUT_SECONDS = 900.0
+"""Generous cap for WASM parsing or DOCX packing of a large case."""
+
+DigestRunner = Callable[..., Coroutine[Any, Any, CaseDigestResult]]
+"""Invocable digest runner; defaults to the OpenRouter-backed engine bridge."""
+
+
+class PipelineError(RuntimeError):
+    """Raised when a pipeline stage fails without a Python-level exception."""
+
+
+@dataclass
+class CaseOutcome:
+    """Result of running the full pipeline for one case PDF."""
+
+    pdf: Path
+    status: Literal["ok", "failed"]
+    docx: Path | None = None
+    elapsed_ms: int = 0
+    error: str | None = None
+
+
+def _tsx_command() -> list[str]:
+    """Return the local tsx launcher, with a clear error when npm deps are missing."""
+    binary = REPO_ROOT / "node_modules" / ".bin" / "tsx"
+    if not binary.is_file():
+        raise PipelineError(
+            "tsx is not installed. Run `npm ci` at the repository root before headless mode."
+        )
+    return [str(binary)]
+
+
+def run_node_script(
+    script: Path,
+    *args: str,
+    timeout: float = DEFAULT_NODE_TIMEOUT_SECONDS,
+) -> str:
+    """Run one TypeScript stage script under tsx, returning its stdout.
+
+    Raises ``PipelineError`` with the captured stderr when the script exits
+    non-zero, so a broken PDF or invalid digest is reported without aborting
+    the worker.
+    """
+    completed = subprocess.run(
+        [*_tsx_command(), str(script), *args],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr.strip() or completed.stdout.strip()) or "no output"
+        raise PipelineError(f"{script.name} failed: {detail[:400]}")
+    return completed.stdout
+
+
+def stage_pdf_inspector(pdf_path: Path, work_dir: Path) -> tuple[Path, Path]:
+    """Convert one PDF to markdown and a context tree via the pdf-inspector script."""
+    markdown_path = work_dir / "source.md"
+    tree_path = work_dir / "tree.json"
+    run_node_script(PDF_INSPECTOR_SCRIPT, str(pdf_path), str(markdown_path), str(tree_path))
+    if not markdown_path.is_file() or not tree_path.is_file():
+        raise PipelineError(f"pdf-inspector produced no output for {pdf_path.name}")
+    return markdown_path, tree_path
+
+
+def stage_agent(
+    tree_path: Path,
+    credentials: Credentials,
+    work_dir: Path,
+    *,
+    runner: DigestRunner | None = None,
+) -> Path:
+    """Run the structured pydantic-agent digest over the context tree.
+
+    The agent is invoked in-process with a fresh event loop per case so the
+    shared service-queue workers stay independent. ``runner`` is injectable so
+    tests can substitute a deterministic digest producer.
+    """
+    root: Mapping[str, object] = json.loads(tree_path.read_text(encoding="utf-8"))
+    digest_runner = runner or run_case_digest
+    result = asyncio.run(digest_runner(root, api_key=credentials.api_key, model_name=credentials.model_slug))
+    digest_path = work_dir / "digest.json"
+    digest_path.write_text(result.digest.model_dump_json(indent=2), encoding="utf-8")
+    return digest_path
+
+
+def stage_docx(digest_path: Path, out_dir: Path, stem: str) -> Path:
+    """Render the digest JSON to ``<out_dir>/<stem>.docx`` via the tsx-docx script."""
+    docx_path = out_dir / f"{stem}.docx"
+    run_node_script(DOCX_SCRIPT, str(digest_path), str(docx_path))
+    if not docx_path.is_file():
+        raise PipelineError(f"tsx-docx produced no document for {stem}")
+    return docx_path
+
+
+def _work_dir(out_dir: Path, stem: str) -> Path:
+    work_dir = out_dir / "work" / stem
+    shutil.rmtree(work_dir, ignore_errors=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir
+
+
+def process_case(
+    pdf_path: Path,
+    out_dir: Path,
+    credentials: Credentials,
+    *,
+    keep_intermediates: bool = False,
+    agent_runner: DigestRunner | None = None,
+) -> CaseOutcome:
+    """Run the full pipeline for one case PDF, isolating failures per case.
+
+    Intermediate artifacts are kept when ``keep_intermediates`` is true or when
+    the case fails, so failures can be inspected in ``<out_dir>/work/<case>/``.
+    """
+    started_at = time.perf_counter()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = pdf_path.stem
+    work_dir = _work_dir(out_dir, stem)
+    try:
+        _, tree_path = stage_pdf_inspector(pdf_path, work_dir)
+        digest_path = stage_agent(tree_path, credentials, work_dir, runner=agent_runner)
+        docx_path = stage_docx(digest_path, out_dir, stem)
+    except (OSError, PipelineError, json.JSONDecodeError) as error:
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+        return CaseOutcome(pdf=pdf_path, status="failed", elapsed_ms=elapsed_ms, error=str(error))
+    except Exception as error:  # pylint: disable=broad-exception-caught  # isolate one bad case
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+        message = str(error) or type(error).__name__
+        return CaseOutcome(pdf=pdf_path, status="failed", elapsed_ms=elapsed_ms, error=message)
+
+    if not keep_intermediates:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+    return CaseOutcome(pdf=pdf_path, status="ok", docx=docx_path, elapsed_ms=elapsed_ms)
