@@ -51,6 +51,7 @@ name = "digest-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["openrouter"] },
 ]
@@ -64,6 +65,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "platformdirs", specifier = ">=4,<5" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic-ai-slim", extras = ["openrouter"], specifier = ">=2.33,<3" },
 ]
