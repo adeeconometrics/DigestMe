@@ -20,16 +20,20 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["engine"]
+packages = ["engine", "cli"]
 
 [tool.setuptools.package-dir]
 engine = "src/engine"
+cli = "src/cli"
+
+[tool.setuptools.package-data]
+cli = ["ts/*.ts"]
 
 [tool.pytest.ini_options]
 testpaths = ["py-tests"]
 
 [tool.mypy]
-files = ["src/engine", "py-tests"]
+files = ["src/engine", "src/cli", "py-tests"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]

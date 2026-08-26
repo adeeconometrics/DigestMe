@@ -60,7 +60,7 @@ jobs:
         run: uv run mypy
 
       - name: Lint
-        run: uv run pylint src/engine py-tests
+        run: uv run pylint src/engine src/cli py-tests
 
       - name: Test
         run: uv run pytest
