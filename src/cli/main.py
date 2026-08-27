@@ -11,7 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+import threading
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="parallel service workers consuming the case queue (default: 8)",
     )
-    parser.add_argument("--api-key", help="OpenRouter API key (overrides stored config)")
+    parser.add_argument("--api-key", help="DeepSeek API key (overrides stored config)")
     parser.add_argument(
         "--model",
         default=None,
@@ -64,6 +65,27 @@ def _format_elapsed(elapsed_ms: int) -> str:
     return f"{elapsed_ms / 1000:.1f}s"
 
 
+def _live_progress(total: int) -> Callable[[CaseOutcome], None]:
+    """Return a thread-safe reporter that prints each case as it finishes."""
+    lock = threading.Lock()
+    completed = 0
+
+    def report(outcome: CaseOutcome) -> None:
+        nonlocal completed
+        with lock:
+            completed += 1
+            if outcome.status == "ok":
+                assert outcome.docx is not None
+                print(f"  [{completed}/{total}] ok      {_format_elapsed(outcome.elapsed_ms):>8}  {outcome.docx}")
+            else:
+                print(
+                    f"  [{completed}/{total}] FAILED  {_format_elapsed(outcome.elapsed_ms):>8}  "
+                    f"{outcome.pdf.name}: {outcome.error}"
+                )
+
+    return report
+
+
 def _print_summary(outcomes: list[CaseOutcome]) -> None:
     """Print one line per case in input order plus a final tally."""
     ok_count = 0
@@ -79,6 +101,22 @@ def _print_summary(outcomes: list[CaseOutcome]) -> None:
     failed = [outcome for outcome in outcomes if outcome.status == "failed"]
     if failed:
         print("Failed cases keep their intermediate artifacts under <outdir>/work/.")
+
+
+def _on_done(
+    job: Path,
+    result_or_error: CaseOutcome | Exception,
+    is_error: bool,
+    report: Callable[[CaseOutcome], None],
+) -> None:
+    """Adapt a service-queue completion into a live status line."""
+    if is_error:
+        outcome = CaseOutcome(pdf=job, status="failed", error=str(result_or_error))
+    else:
+        completed_outcome = result_or_error
+        assert isinstance(completed_outcome, CaseOutcome)
+        outcome = completed_outcome
+    report(outcome)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -101,7 +139,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         credentials=credentials,
         keep_intermediates=args.keep_intermediates,
     )
-    results, errors = ServiceQueue(cases, worker, worker_count=args.workers).run()
+    report = _live_progress(len(cases))
+    results, errors = ServiceQueue(
+        cases,
+        worker,
+        worker_count=args.workers,
+        on_done=partial(_on_done, report=report),
+    ).run()
     assert not errors, f"unexpected worker failures: {errors}"
 
     outcomes = dict(results)

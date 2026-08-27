@@ -11,7 +11,7 @@ from cli.config import CredentialError, Credentials
 from cli.main import main
 from cli.pipeline import CaseOutcome
 
-CREDENTIALS = Credentials(api_key="sk-or-test", model_slug="openai/gpt-4o-mini")
+CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
 
 
 def _indir(tmp_path: Path) -> Path:
@@ -47,7 +47,7 @@ class FailingStore:
     """Credential store stub that always fails resolution."""
 
     def resolve(self, api_key: str | None = None, model_slug: str | None = None) -> Credentials:
-        raise CredentialError("No OpenRouter API key configured. Set DIGEST_API_KEY.")
+        raise CredentialError("No DeepSeek API key configured. Set DIGEST_API_KEY.")
 
 
 def test_main_writes_summary_and_returns_zero(
@@ -65,7 +65,11 @@ def test_main_writes_summary_and_returns_zero(
     summary = json.loads(outdir.joinpath("summary.json").read_text(encoding="utf-8"))
     assert [row["case"] for row in summary] == ["a.pdf", "b.pdf"]
     assert all(row["status"] == "ok" for row in summary)
-    assert "openai/gpt-4o-mini" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "deepseek-v4-flash" in output
+    assert "[1/2] ok" in output
+    assert "[2/2] ok" in output
+    assert "2/2 cases digested" in output
 
 
 def test_main_reports_missing_credentials(

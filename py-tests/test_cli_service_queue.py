@@ -64,3 +64,44 @@ def test_empty_job_list_completes_immediately() -> None:
 def test_rejects_zero_workers() -> None:
     with pytest.raises(ValueError, match="worker_count"):
         ServiceQueue([1], lambda job: job, worker_count=0)
+
+
+def test_on_done_reports_each_completion_in_order() -> None:
+    jobs = list(range(5))
+    reported: list[tuple[int, object, bool]] = []
+
+    def worker(job: int) -> int:
+        return job * 10
+
+    results, errors = ServiceQueue(
+        jobs,
+        worker,
+        worker_count=2,
+        on_done=lambda job, result, is_error: reported.append((job, result, is_error)),
+    ).run()
+
+    assert not errors
+    assert len(results) == len(jobs)
+    assert len(reported) == len(jobs)
+    assert all(is_error is False for _, _, is_error in reported)
+    assert sorted((job, result) for job, result, _ in reported) == [(job, job * 10) for job in jobs]
+
+
+def test_on_done_reports_worker_failures() -> None:
+    reported: list[tuple[int, object, bool]] = []
+
+    def worker(job: int) -> int:
+        raise ValueError("boom")
+
+    results, errors = ServiceQueue(
+        [1, 2],
+        worker,
+        worker_count=2,
+        on_done=lambda job, result, is_error: reported.append((job, result, is_error)),
+    ).run()
+
+    assert not results
+    assert len(errors) == 2
+    assert len(reported) == 2
+    assert all(is_error for _, _, is_error in reported)
+    assert all(isinstance(result, ValueError) for _, result, _ in reported)

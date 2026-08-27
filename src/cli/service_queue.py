@@ -20,6 +20,9 @@ Result = TypeVar("Result")
 _SENTINEL = object()
 """Queue marker that tells one worker to stop after all real jobs are drained."""
 
+OnDone = Callable[[Job, Result | Exception, bool], None]
+"""Completion callback ``(job, result_or_error, is_error)`` invoked per job."""
+
 
 class ServiceQueue(Generic[Job, Result]):
     """Run ``worker`` over every job with a pool of concurrent service workers."""
@@ -30,10 +33,12 @@ class ServiceQueue(Generic[Job, Result]):
         worker: Callable[[Job], Result],
         *,
         worker_count: int = 8,
+        on_done: OnDone[Job, Result] | None = None,
     ) -> None:
         if worker_count < 1:
             raise ValueError("worker_count must be at least 1")
         self._worker = worker
+        self._on_done = on_done
         self._queue: queue.Queue[Job | object] = queue.Queue()
         for job in jobs:
             self._queue.put(job)
@@ -73,8 +78,12 @@ class ServiceQueue(Generic[Job, Result]):
                 except Exception as error:  # pylint: disable=broad-exception-caught  # isolate one bad job
                     with self._lock:
                         self._errors.append((job, error))
+                    if self._on_done is not None:
+                        self._on_done(job, error, True)
                 else:
                     with self._lock:
                         self._results.append((job, result))
+                    if self._on_done is not None:
+                        self._on_done(job, result, False)
             finally:
                 self._queue.task_done()
