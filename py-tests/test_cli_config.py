@@ -17,19 +17,28 @@ from cli.config import (
 )
 
 
-def test_normalize_model_slug_converts_colon_to_slash() -> None:
-    assert normalize_model_slug("deepseek:deepseek-v4-flash") == "deepseek/deepseek-v4-flash"
+def test_normalize_model_slug_strips_colon_provider_prefix() -> None:
+    assert normalize_model_slug("deepseek:deepseek-v4-flash") == "deepseek-v4-flash"
 
 
-def test_normalize_model_slug_passes_slash_through() -> None:
-    assert normalize_model_slug("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+def test_normalize_model_slug_strips_slash_provider_prefix() -> None:
+    assert normalize_model_slug("deepseek/deepseek-v4-flash") == "deepseek-v4-flash"
+
+
+def test_normalize_model_slug_passes_bare_model_id_through() -> None:
+    assert normalize_model_slug("deepseek-v4-flash") == "deepseek-v4-flash"
 
 
 def test_normalize_model_slug_strips_surrounding_space() -> None:
-    assert normalize_model_slug("  openai/gpt-4o-mini  ") == "openai/gpt-4o-mini"
+    assert normalize_model_slug("  deepseek-v4-flash  ") == "deepseek-v4-flash"
 
 
-@pytest.mark.parametrize("slug", ["", "   ", "openai", "openai/", "/gpt-4o"])
+def test_normalize_model_slug_rejects_foreign_provider() -> None:
+    with pytest.raises(CredentialError):
+        normalize_model_slug("openai/gpt-4o-mini")
+
+
+@pytest.mark.parametrize("slug", ["", "   ", "deepseek/", "/gpt-4o", "openai:gpt-4o-mini"])
 def test_normalize_model_slug_rejects_malformed_slugs(slug: str) -> None:
     with pytest.raises(CredentialError):
         normalize_model_slug(slug)
@@ -59,22 +68,22 @@ def test_load_returns_none_for_missing_or_corrupt_file(tmp_path: Path) -> None:
 def test_resolve_prefers_argument_over_env_and_stored(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv(API_KEY_ENV, "sk-or-env")
-    monkeypatch.setenv(MODEL_SLUG_ENV, "env/model")
+    monkeypatch.setenv(API_KEY_ENV, "sk-env")
+    monkeypatch.setenv(MODEL_SLUG_ENV, "deepseek-chat")
     store = CredentialStore(tmp_path / "config.json")
-    store.save(Credentials(api_key="sk-or-stored", model_slug="stored/model"))
+    store.save(Credentials(api_key="sk-stored", model_slug="deepseek-reasoner"))
 
-    credentials = store.resolve(api_key="sk-or-arg", model_slug="arg/model")
-    assert credentials == Credentials(api_key="sk-or-arg", model_slug="arg/model")
+    credentials = store.resolve(api_key="sk-arg", model_slug="deepseek-v4-flash")
+    assert credentials == Credentials(api_key="sk-arg", model_slug="deepseek-v4-flash")
 
 
 def test_resolve_falls_back_to_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv(API_KEY_ENV, "sk-or-env")
-    monkeypatch.setenv(MODEL_SLUG_ENV, "env/model")
+    monkeypatch.setenv(API_KEY_ENV, "sk-env")
+    monkeypatch.setenv(MODEL_SLUG_ENV, "deepseek-chat")
     credentials = CredentialStore(tmp_path / "config.json").resolve()
-    assert credentials == Credentials(api_key="sk-or-env", model_slug="env/model")
+    assert credentials == Credentials(api_key="sk-env", model_slug="deepseek-chat")
 
 
 def test_resolve_falls_back_to_stored_without_prompting(
@@ -83,10 +92,10 @@ def test_resolve_falls_back_to_stored_without_prompting(
     monkeypatch.delenv(API_KEY_ENV, raising=False)
     monkeypatch.delenv(MODEL_SLUG_ENV, raising=False)
     store = CredentialStore(tmp_path / "config.json")
-    store.save(Credentials(api_key="sk-or-stored", model_slug="stored/model"))
+    store.save(Credentials(api_key="sk-stored", model_slug="deepseek-reasoner"))
 
     credentials = store.resolve()
-    assert credentials == Credentials(api_key="sk-or-stored", model_slug="stored/model")
+    assert credentials == Credentials(api_key="sk-stored", model_slug="deepseek-reasoner")
 
 
 def test_resolve_prompts_and_persists_on_first_run(tmp_path: Path) -> None:
@@ -96,11 +105,11 @@ def test_resolve_prompts_and_persists_on_first_run(tmp_path: Path) -> None:
 
         def prompt(self, message: str) -> str:
             self.messages.append(message)
-            return "my/model"
+            return "deepseek-chat"
 
         def secret(self, message: str) -> str:
             self.messages.append(message)
-            return "sk-or-typed"
+            return "sk-typed"
 
     recorder = PromptRecorder()
     store = CredentialStore(
@@ -111,9 +120,9 @@ def test_resolve_prompts_and_persists_on_first_run(tmp_path: Path) -> None:
     )
 
     credentials = store.resolve()
-    assert credentials == Credentials(api_key="sk-or-typed", model_slug="my/model")
+    assert credentials == Credentials(api_key="sk-typed", model_slug="deepseek-chat")
     assert store.load() == credentials
-    assert recorder.messages == ["OpenRouter API key: ", "Model slug [deepseek:deepseek-v4-flash]: "]
+    assert recorder.messages == ["DeepSeek API key: ", "Model slug [deepseek-v4-flash]: "]
 
 
 def test_resolve_uses_default_model_slug_when_prompt_is_blank(tmp_path: Path) -> None:

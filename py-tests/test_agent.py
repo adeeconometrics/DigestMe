@@ -1,7 +1,10 @@
 """Tests for provider-specific agent construction."""
 
 import pytest
+from pydantic_ai import UsageLimits
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from engine.agent import (
@@ -9,10 +12,46 @@ from engine.agent import (
     AGENT_MAX_TOKENS,
     AGENT_INSTRUCTIONS,
     CHAT_MAX_TOKENS,
+    DIGEST_USAGE_LIMITS,
     build_agent,
     build_chat_agent,
+    build_chat_deepseek_agent,
+    build_deepseek_agent,
     build_openrouter_agent,
 )
+
+
+def test_digest_usage_limits_are_generous_for_headless_runs() -> None:
+    assert isinstance(DIGEST_USAGE_LIMITS, UsageLimits)
+    assert DIGEST_USAGE_LIMITS.request_limit == 300
+
+
+def test_build_deepseek_agent_uses_explicit_model_and_key() -> None:
+    agent = build_deepseek_agent(api_key="test-key", model_name="deepseek-v4-flash")
+
+    assert isinstance(agent.model, OpenAIChatModel)
+    assert agent.model.model_name == "deepseek-v4-flash"
+    provider = agent.model.provider
+    assert isinstance(provider, DeepSeekProvider)
+    assert provider.base_url == "https://api.deepseek.com"
+    assert provider.client.api_key == "test-key"
+
+
+def test_build_chat_deepseek_agent_targets_same_platform() -> None:
+    agent = build_chat_deepseek_agent(api_key="test-key", model_name="deepseek-chat")
+
+    assert isinstance(agent.model, OpenAIChatModel)
+    assert agent.model.model_name == "deepseek-chat"
+    assert isinstance(agent.model.provider, DeepSeekProvider)
+
+
+@pytest.mark.parametrize(
+    ("api_key", "model_name"),
+    [("", "deepseek-v4-flash"), ("test-key", "  ")],
+)
+def test_build_deepseek_agent_rejects_incomplete_configuration(api_key: str, model_name: str) -> None:
+    with pytest.raises(ValueError):
+        build_deepseek_agent(api_key=api_key, model_name=model_name)
 
 
 def test_build_openrouter_agent_uses_explicit_model_and_key() -> None:

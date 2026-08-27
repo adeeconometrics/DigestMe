@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from engine.agent import DIGEST_USAGE_LIMITS, build_deepseek_agent
 from engine.bridge import run_case_digest
 from engine.schemas import CaseDigestResult
 
@@ -32,8 +33,11 @@ DOCX_SCRIPT = TS_SCRIPT_DIR / "docx.ts"
 DEFAULT_NODE_TIMEOUT_SECONDS = 900.0
 """Generous cap for WASM parsing or DOCX packing of a large case."""
 
+DIGEST_STAGE_TIMEOUT_SECONDS = 600.0
+"""Per-case wall-clock cap (10 minutes) for the in-process agent stage."""
+
 DigestRunner = Callable[..., Coroutine[Any, Any, CaseDigestResult]]
-"""Invocable digest runner; defaults to the OpenRouter-backed engine bridge."""
+"""Invocable digest runner; defaults to the DeepSeek-platform engine bridge."""
 
 
 class PipelineError(RuntimeError):
@@ -96,6 +100,35 @@ def stage_pdf_inspector(pdf_path: Path, work_dir: Path) -> tuple[Path, Path]:
     return markdown_path, tree_path
 
 
+async def run_deepseek_digest(
+    root: Mapping[str, object],
+    *,
+    api_key: str,
+    model_name: str,
+) -> CaseDigestResult:
+    """Run one digest against DeepSeek's platform API (``api.deepseek.com``).
+
+    The agent run gets the generous headless request budget and a 10-minute
+    wall-clock cap so one runaway case cannot stall its worker forever.
+    """
+    agent = build_deepseek_agent(api_key=api_key, model_name=model_name)
+    try:
+        return await asyncio.wait_for(
+            run_case_digest(
+                root,
+                api_key=api_key,
+                model_name=model_name,
+                agent=agent,
+                usage_limits=DIGEST_USAGE_LIMITS,
+            ),
+            timeout=DIGEST_STAGE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as error:
+        raise PipelineError(
+            f"agent stage exceeded the {DIGEST_STAGE_TIMEOUT_SECONDS:g}s per-case limit"
+        ) from error
+
+
 def stage_agent(
     tree_path: Path,
     credentials: Credentials,
@@ -107,10 +140,11 @@ def stage_agent(
 
     The agent is invoked in-process with a fresh event loop per case so the
     shared service-queue workers stay independent. ``runner`` is injectable so
-    tests can substitute a deterministic digest producer.
+    tests can substitute a deterministic digest producer. The default runner
+    targets the DeepSeek platform directly.
     """
     root: Mapping[str, object] = json.loads(tree_path.read_text(encoding="utf-8"))
-    digest_runner = runner or run_case_digest
+    digest_runner = runner or run_deepseek_digest
     result = asyncio.run(digest_runner(root, api_key=credentials.api_key, model_name=credentials.model_slug))
     digest_path = work_dir / "digest.json"
     digest_path.write_text(result.digest.model_dump_json(indent=2), encoding="utf-8")

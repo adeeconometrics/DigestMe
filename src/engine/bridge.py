@@ -8,7 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from time import perf_counter, time_ns
 from typing import Any
 
-from pydantic_ai import Agent, AgentRunEvents, AgentRunResult, capture_run_messages
+from pydantic_ai import Agent, AgentRunEvents, AgentRunResult, UsageLimits, capture_run_messages
 from pydantic_ai.exceptions import (
     ContentFilterError,
     ModelAPIError,
@@ -287,11 +287,18 @@ async def run_case_digest(
     api_key: str,
     model_name: str,
     agent: Agent[DocumentContext, CaseDigest] | None = None,
+    usage_limits: UsageLimits | None = None,
 ) -> CaseDigestResult:
-    """Run the structured case-digest agent and retain its source references."""
+    """Run the structured case-digest agent and retain its source references.
+
+    ``usage_limits`` defaults to pydantic-ai's per-run budget (50 requests);
+    headless runs pass ``DIGEST_USAGE_LIMITS`` to lift that cap.
+    """
     context = _context(root)
     runner = agent or build_openrouter_agent(api_key=api_key, model_name=model_name)
-    result, elapsed_ms = await _run_agent(lambda: runner.run(DIGEST_PROMPT, deps=context))
+    result, elapsed_ms = await _run_agent(
+        lambda: runner.run(DIGEST_PROMPT, deps=context, usage_limits=usage_limits)
+    )
     return CaseDigestResult(
         digest=result.output,
         references=context.to_references(),

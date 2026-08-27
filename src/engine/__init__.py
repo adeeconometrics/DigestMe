@@ -3,9 +3,12 @@
 from .agent import (
     AGENT_INSTRUCTIONS,
     CHAT_AGENT_INSTRUCTIONS,
+    DIGEST_USAGE_LIMITS,
     build_agent,
     build_chat_agent,
+    build_chat_deepseek_agent,
     build_chat_openrouter_agent,
+    build_deepseek_agent,
     build_openrouter_agent,
 )
 from .document import (
@@ -25,6 +28,7 @@ from .tools import DocumentContext, global_search, navigate_document
 __all__ = [
     "AGENT_INSTRUCTIONS",
     "CHAT_AGENT_INSTRUCTIONS",
+    "DIGEST_USAGE_LIMITS",
     "CaseDigest",
     "CaseDigestFacts",
     "CaseDigestIssue",
@@ -39,7 +43,9 @@ __all__ = [
     "SearchResult",
     "build_agent",
     "build_chat_agent",
+    "build_chat_deepseek_agent",
     "build_chat_openrouter_agent",
+    "build_deepseek_agent",
     "build_openrouter_agent",
     "find_section",
     "flatten_tree",

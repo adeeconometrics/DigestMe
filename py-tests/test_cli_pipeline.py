@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -13,13 +14,15 @@ from cli.pipeline import (
     REPO_ROOT,
     PipelineError,
     process_case,
+    run_deepseek_digest,
     run_node_script,
     stage_agent,
     stage_docx,
     stage_pdf_inspector,
 )
+from engine.agent import DIGEST_USAGE_LIMITS
 
-CREDENTIALS = Credentials(api_key="sk-or-test", model_slug="openai/gpt-4o-mini")
+CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
 
 
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -93,16 +96,59 @@ def test_stage_agent_writes_digest_json(monkeypatch: pytest.MonkeyPatch, tmp_pat
     class FakeResult:
         digest = FakeDigest()
 
-    async def fake_run_digest(root: object, *, api_key: str, model_name: str) -> FakeResult:
+    async def fake_run_digest(
+        root: object, *, api_key: str, model_name: str, agent: object, usage_limits: object
+    ) -> FakeResult:
         captured["root"] = str(root)
         captured["api_key"] = api_key
         captured["model_name"] = model_name
+        captured["agent_built"] = "True" if agent is not None else "False"
+        captured["usage_limits"] = "set" if usage_limits is not None else "unset"
         return FakeResult()
 
     monkeypatch.setattr("cli.pipeline.run_case_digest", fake_run_digest)
     digest_path = stage_agent(tree_path, CREDENTIALS, tmp_path)
     assert json.loads(digest_path.read_text(encoding="utf-8")) == {"case_title": "A v. B"}
-    assert captured == {"root": "{'id': 'n0'}", "api_key": "sk-or-test", "model_name": "openai/gpt-4o-mini"}
+    assert captured == {
+        "root": "{'id': 'n0'}",
+        "api_key": "sk-test",
+        "model_name": "deepseek-v4-flash",
+        "agent_built": "True",
+        "usage_limits": "set",
+    }
+
+
+def test_run_deepseek_digest_uses_generous_usage_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDigest:
+        def model_dump_json(self, *, indent: int) -> str:
+            return "{}"
+
+    class FakeResult:
+        digest = FakeDigest()
+
+    async def fake_run_digest(root: object, **kwargs: object) -> FakeResult:
+        captured["usage_limits"] = kwargs.get("usage_limits")
+        return FakeResult()
+
+    monkeypatch.setattr("cli.pipeline.run_case_digest", fake_run_digest)
+    asyncio.run(run_deepseek_digest({"id": "n0"}, api_key="sk-test", model_name="deepseek-v4-flash"))
+    assert captured["usage_limits"] == DIGEST_USAGE_LIMITS
+
+
+def test_run_deepseek_digest_raises_on_stage_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def never_finishes(root: object, **kwargs: object) -> object:
+        await asyncio.sleep(60)
+        return None
+
+    monkeypatch.setattr("cli.pipeline.run_case_digest", never_finishes)
+    monkeypatch.setattr("cli.pipeline.DIGEST_STAGE_TIMEOUT_SECONDS", 0.05)
+
+    with pytest.raises(PipelineError, match="exceeded the"):
+        asyncio.run(run_deepseek_digest({"id": "n0"}, api_key="sk-test", model_name="deepseek-v4-flash"))
 
 
 def test_stage_docx_writes_document(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

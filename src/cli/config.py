@@ -3,7 +3,9 @@
 Credentials are resolved with the precedence: explicit CLI flag, environment
 variable, stored config file, then an interactive prompt. The key is stored
 plaintext in a user config file with owner-only permissions; headless batch
-runs should prefer the ``DIGEST_API_KEY`` environment variable instead.
+runs should prefer the ``DIGEST_API_KEY`` environment variable instead. The
+engine talks to DeepSeek's own platform API; the key must be a DeepSeek
+platform key (``sk-`` prefixed), not an OpenRouter key.
 """
 
 from __future__ import annotations
@@ -18,8 +20,8 @@ from typing import Callable
 
 import platformdirs
 
-DEFAULT_MODEL_SLUG = "deepseek:deepseek-v4-flash"
-"""Default OpenRouter model slug used when nothing else is configured."""
+DEFAULT_MODEL_SLUG = "deepseek-v4-flash"
+"""Default DeepSeek platform model used when nothing else is configured."""
 
 API_KEY_ENV = "DIGEST_API_KEY"
 MODEL_SLUG_ENV = "DIGEST_MODEL_SLUG"
@@ -41,20 +43,35 @@ class Credentials:
 
 
 def normalize_model_slug(raw: str) -> str:
-    """Return the canonical ``provider/model`` slug, accepting a ``:`` separator.
+    """Return the canonical DeepSeek model id, stripping a provider prefix.
 
-    The CLI default (``deepseek:deepseek-v4-flash``) uses a colon while the
-    OpenRouter model builder requires the ``provider/model`` form, so the
-    separator is normalized once at configuration time.
+    The engine talks to DeepSeek's own platform (``api.deepseek.com``), whose
+    model ids are bare names (``deepseek-v4-flash``). Legacy ``deepseek:`` and
+    ``deepseek/`` prefixed forms are accepted and normalized, while slugs for
+    other providers are rejected because the DeepSeek API cannot serve them.
     """
     slug = raw.strip()
-    if ":" in slug and "/" not in slug:
-        provider, _, model = slug.partition(":")
-        slug = f"{provider}/{model}"
-    provider, separator, model = slug.partition("/")
-    if not separator or not provider or not model:
+    if not slug:
         raise CredentialError(
-            f"Invalid model slug {raw!r}: expected provider/model (e.g. deepseek/deepseek-v4-flash)"
+            f"Invalid model slug {raw!r}: expected a DeepSeek model id (e.g. {DEFAULT_MODEL_SLUG})"
+        )
+    provider = ""
+    separated = False
+    if ":" in slug:
+        provider, _, slug = slug.partition(":")
+        separated = True
+    elif "/" in slug:
+        provider, _, slug = slug.partition("/")
+        separated = True
+    provider = provider.strip().lower()
+    slug = slug.strip()
+    if separated and (not provider or provider != "deepseek"):
+        raise CredentialError(
+            f"Invalid model slug {raw!r}: expected a DeepSeek model id (e.g. {DEFAULT_MODEL_SLUG})"
+        )
+    if not slug or ":" in slug or "/" in slug:
+        raise CredentialError(
+            f"Invalid model slug {raw!r}: expected a DeepSeek model id (e.g. {DEFAULT_MODEL_SLUG})"
         )
     return slug
 
@@ -138,9 +155,9 @@ class CredentialStore:
         if not resolved_key:
             if not self._interactive():
                 raise CredentialError(
-                    f"No OpenRouter API key configured. Set {API_KEY_ENV} or run once interactively."
+                    f"No DeepSeek API key configured. Set {API_KEY_ENV} or run once interactively."
                 )
-            resolved_key = self._secret_prompt("OpenRouter API key: ").strip()
+            resolved_key = self._secret_prompt("DeepSeek API key: ").strip()
             prompted_key = True
         if not resolved_key:
             raise CredentialError("The OpenRouter API key must not be empty")

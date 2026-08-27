@@ -6,10 +6,12 @@ from collections.abc import AsyncIterator, Iterable
 from httpx2 import AsyncClient, Request, Response
 from httpx2._transports import AsyncHTTPTransport
 from httpx2._types import AsyncByteStream
-from pydantic_ai import Agent
+from pydantic_ai import Agent, UsageLimits
 from pydantic_ai.agent.abstract import AgentRetries
 from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
@@ -27,6 +29,15 @@ CHAT_MODEL_SETTINGS: ModelSettings = ModelSettings(max_tokens=CHAT_MAX_TOKENS)
 
 AGENT_RETRIES: AgentRetries = {"tools": 2, "output": 3}
 """Retry budgets for recoverable tool and structured-output mistakes."""
+
+DIGEST_USAGE_LIMITS = UsageLimits(request_limit=300)
+"""Per-run model request budget for headless digests.
+
+Headless runs pass this to ``Agent.run`` so large cases can spend many tool
+rounds on search and navigation; the 10-minute per-case stage timeout in the
+CLI pipeline is the binding constraint, not this cap. Browser runs keep the
+framework default of 50 requests unless they opt in explicitly.
+"""
 
 
 AGENT_INSTRUCTIONS = """\
@@ -96,52 +107,61 @@ def _browser_safe_headers(headers: Iterable[tuple[str, str]]) -> list[tuple[str,
     return [(name, value) for name, value in headers if not name.lower().startswith("x-stainless-")]
 
 
+class _BytesStream(AsyncByteStream):
+    """Coerce pyodide ``memoryview`` chunks into ``bytes`` for the SSE decoder.
+
+    httpcore2's pyodide network backend yields ``memoryview`` slices, which the
+    openai SDK's streaming parser feeds to ``str.splitlines`` and rejects. Wrapping
+    the response stream normalizes every chunk to ``bytes`` without copying.
+    """
+
+    def __init__(self, stream: AsyncByteStream) -> None:
+        self._stream = stream
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._stream:
+            yield bytes(chunk) if isinstance(chunk, memoryview) else chunk
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+class _BrowserSafeTransport(AsyncHTTPTransport):
+    """Async transport that strips CORS-unsafe telemetry headers."""
+
+    async def handle_async_request(self, request: Request) -> Response:
+        safe_request = Request(
+            method=request.method,
+            url=request.url,
+            headers=_browser_safe_headers(request.headers.items()),
+            stream=request.stream,
+            extensions=request.extensions,
+        )
+        response = await super().handle_async_request(safe_request)
+        stream = response.stream
+        if not isinstance(stream, AsyncByteStream):
+            raise AssertionError("async transport must return an async byte stream")
+        return Response(
+            response.status_code,
+            headers=response.headers,
+            stream=_BytesStream(stream),
+            request=safe_request,
+            extensions=response.extensions,
+            history=response.history,
+            default_encoding=response.default_encoding,
+        )
+
+
+def _browser_safe_client() -> AsyncClient:
+    """An HTTP client with the transport shim required by pyodide."""
+    return AsyncClient(transport=_BrowserSafeTransport())
+
+
 def _openrouter_provider(*, api_key: str) -> OpenRouterProvider:
     """Create the OpenRouter provider, shimming the transport in the browser."""
     if sys.platform != "emscripten":
         return OpenRouterProvider(api_key=api_key)
-
-    class _BytesStream(AsyncByteStream):
-        """Coerce pyodide ``memoryview`` chunks into ``bytes`` for the SSE decoder.
-
-        httpcore2's pyodide network backend yields ``memoryview`` slices, which the
-        openai SDK's streaming parser feeds to ``str.splitlines`` and rejects. Wrapping
-        the response stream normalizes every chunk to ``bytes`` without copying.
-        """
-
-        def __init__(self, stream: AsyncByteStream) -> None:
-            self._stream = stream
-
-        async def __aiter__(self) -> AsyncIterator[bytes]:
-            async for chunk in self._stream:
-                yield bytes(chunk) if isinstance(chunk, memoryview) else chunk
-
-        async def aclose(self) -> None:
-            await self._stream.aclose()
-
-    class _BrowserSafeTransport(AsyncHTTPTransport):
-        """Async transport that strips CORS-unsafe telemetry headers."""
-
-        async def handle_async_request(self, request: Request) -> Response:
-            safe_request = Request(
-                method=request.method,
-                url=request.url,
-                headers=_browser_safe_headers(request.headers.items()),
-                stream=request.stream,
-                extensions=request.extensions,
-            )
-            response = await super().handle_async_request(safe_request)
-            return Response(
-                response.status_code,
-                headers=response.headers,
-                stream=_BytesStream(response.stream),
-                request=safe_request,
-                extensions=response.extensions,
-                history=response.history,
-                default_encoding=response.default_encoding,
-            )
-
-    return OpenRouterProvider(api_key=api_key, http_client=AsyncClient(transport=_BrowserSafeTransport()))
+    return OpenRouterProvider(api_key=api_key, http_client=_browser_safe_client())
 
 
 def _openrouter_model(*, api_key: str, model_name: str) -> OpenRouterModel:
@@ -159,6 +179,37 @@ def _openrouter_model(*, api_key: str, model_name: str) -> OpenRouterModel:
         normalized_model,
         provider=_openrouter_provider(api_key=normalized_key),
     )
+
+
+def _deepseek_provider(*, api_key: str) -> DeepSeekProvider:
+    """Create the DeepSeek platform provider, shimming the transport in the browser."""
+    if sys.platform != "emscripten":
+        return DeepSeekProvider(api_key=api_key)
+
+    return DeepSeekProvider(api_key=api_key, http_client=_browser_safe_client())
+
+
+def _deepseek_model(*, api_key: str, model_name: str) -> OpenAIChatModel:
+    """Validate per-request DeepSeek credentials and construct its model."""
+    normalized_key = api_key.strip()
+    if not normalized_key:
+        raise ValueError("DeepSeek API key is required")
+
+    normalized_model = model_name.strip()
+    if not normalized_model:
+        raise ValueError("model_name must be a DeepSeek model id")
+
+    return OpenAIChatModel(normalized_model, provider=_deepseek_provider(api_key=normalized_key))
+
+
+def build_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, CaseDigest]:
+    """Build a DeepSeek-platform-backed agent using credentials supplied for one run."""
+    return build_agent(_deepseek_model(api_key=api_key, model_name=model_name))
+
+
+def build_chat_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
+    """Build the markdown chat agent backed by the DeepSeek platform."""
+    return build_chat_agent(_deepseek_model(api_key=api_key, model_name=model_name))
 
 
 def build_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, CaseDigest]:
