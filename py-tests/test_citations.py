@@ -3,7 +3,6 @@
 from engine.citations import CITATION_FAMILIES, find_citations_in_document
 from engine.document import DocumentNode
 
-
 def test_find_citations_sweeps_case_numbers_and_dedupes_within_a_node(
     citation_tree: DocumentNode,
 ) -> None:
@@ -79,10 +78,8 @@ def test_find_citations_rejects_an_unknown_family(citation_tree: DocumentNode) -
 
     assert result.hits == []
     assert result.total == 0
-    error = result.error
-    assert error is not None
-    assert "writ" in error
-    assert "case_number" in error
+    expected = f"Unknown citation family: writ. Expected one of: {', '.join(CITATION_FAMILIES)}"
+    assert result.error == expected
 
 
 def test_find_citations_rejects_a_negative_offset(citation_tree: DocumentNode) -> None:
