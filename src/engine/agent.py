@@ -16,7 +16,13 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
 from .schemas import CaseDigest
-from .tools import DocumentContext, global_search, navigate_document
+from .tools import (
+    DocumentContext,
+    find_citations,
+    global_search,
+    navigate_document,
+    ranked_search,
+)
 
 
 AGENT_MAX_TOKENS = 16_384
@@ -67,6 +73,28 @@ Ground every factual claim in the source document and say when the document does
 """
 
 
+COMMENTARY_AGENT_INSTRUCTIONS = """\
+Create a commentary digest for the supplied legal commentary or book chapter.
+Start by enumerating the chapter's structure.
+Enumerate its sections and note the statutory provisions each section covers.
+Then read each section's contents with windowed navigation (depth 2 or 3, then paging)
+before writing any digest field.
+Use global search for exact statutory terms, ranked search when the source paraphrases
+the topic, and find_citations to sweep case numbers, case names, SEC opinions, and
+in-text section cross-references.
+Ground every field in the source and preserve section and page references.
+Do not invent authorities: report only the cases, laws, and SEC rules the source
+actually cites, and say when the source is silent.
+Keep each field concise enough that the whole digest fits in one response; use no more
+than six items in any list.
+Return only the digest fields defined by your output schema; never add extra keys.
+"""
+
+
+COMMENTARY_TOOLS = (navigate_document, global_search, ranked_search, find_citations)
+"""Agent toolset for commentary runs: navigation plus search and citation sweeps."""
+
+
 def build_agent(model: Model | str | None = None) -> Agent[DocumentContext, CaseDigest]:
     """Build a structured case-digest agent for one injected document context."""
     return Agent(
@@ -92,6 +120,24 @@ def build_chat_agent(model: Model | str | None = None) -> Agent[DocumentContext,
         retries=AGENT_RETRIES,
         instructions=CHAT_AGENT_INSTRUCTIONS,
         tools=[navigate_document, global_search],
+    )
+
+
+def build_commentary_agent(model: Model | str | None = None) -> Agent[DocumentContext, str]:
+    """Build a commentary-digest agent with the full retrieval toolset.
+
+    The agent returns a chapter digest as text for now; a typed
+    ``CommentaryDigest`` output schema will replace ``str`` when it lands.
+    """
+    return Agent(
+        model=model,
+        name="commentary-digest-engine",
+        deps_type=DocumentContext,
+        output_type=str,
+        model_settings=AGENT_MODEL_SETTINGS,
+        retries=AGENT_RETRIES,
+        instructions=COMMENTARY_AGENT_INSTRUCTIONS,
+        tools=COMMENTARY_TOOLS,
     )
 
 
@@ -207,6 +253,11 @@ def build_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentCont
     return build_agent(_deepseek_model(api_key=api_key, model_name=model_name))
 
 
+def build_commentary_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
+    """Build the commentary agent backed by the DeepSeek platform."""
+    return build_commentary_agent(_deepseek_model(api_key=api_key, model_name=model_name))
+
+
 def build_chat_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
     """Build the markdown chat agent backed by the DeepSeek platform."""
     return build_chat_agent(_deepseek_model(api_key=api_key, model_name=model_name))
@@ -220,6 +271,11 @@ def build_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentCo
     configuration and logs.
     """
     return build_agent(_openrouter_model(api_key=api_key, model_name=model_name))
+
+
+def build_commentary_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
+    """Build the commentary agent backed by OpenRouter."""
+    return build_commentary_agent(_openrouter_model(api_key=api_key, model_name=model_name))
 
 
 def build_chat_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
