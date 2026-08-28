@@ -14,9 +14,13 @@ from cli.pipeline import (
     REPO_ROOT,
     PipelineError,
     process_case,
+    process_chapter,
+    run_commentary_deepseek_digest,
     run_deepseek_digest,
     run_node_script,
     stage_agent,
+    stage_commentary_agent,
+    stage_commentary_docx,
     stage_docx,
     stage_pdf_inspector,
 )
@@ -149,6 +153,129 @@ def test_run_deepseek_digest_raises_on_stage_timeout(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(PipelineError, match="exceeded the"):
         asyncio.run(run_deepseek_digest({"id": "n0"}, api_key="sk-test", model_name="deepseek-v4-flash"))
+
+
+def test_run_commentary_deepseek_digest_uses_generous_usage_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDigest:
+        def model_dump_json(self, *, indent: int) -> str:
+            return "{}"
+
+    class FakeResult:
+        digest = FakeDigest()
+
+    async def fake_run_commentary(root: object, **kwargs: object) -> FakeResult:
+        captured["usage_limits"] = kwargs.get("usage_limits")
+        captured["agent_name"] = getattr(kwargs.get("agent"), "name", None)
+        return FakeResult()
+
+    monkeypatch.setattr("cli.pipeline.run_commentary_digest", fake_run_commentary)
+    asyncio.run(
+        run_commentary_deepseek_digest({"id": "n0"}, api_key="sk-test", model_name="deepseek-v4-flash")
+    )
+    assert captured["usage_limits"] == DIGEST_USAGE_LIMITS
+    assert captured["agent_name"] == "commentary-digest-engine"
+
+
+def test_stage_commentary_agent_writes_commentary_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tree_path = tmp_path / "tree.json"
+    tree_path.write_text(json.dumps({"id": "n0"}), encoding="utf-8")
+    captured: dict[str, str] = {}
+
+    class FakeDigest:
+        def model_dump_json(self, *, indent: int) -> str:
+            return json.dumps({"chapter_title": "Board of Directors"}, indent=indent)
+
+    class FakeResult:
+        digest = FakeDigest()
+
+    async def fake_run_commentary(root: object, **kwargs: object) -> FakeResult:
+        captured["model_name"] = str(kwargs.get("model_name"))
+        captured["usage_limits"] = "set" if kwargs.get("usage_limits") is not None else "unset"
+        return FakeResult()
+
+    monkeypatch.setattr("cli.pipeline.run_commentary_deepseek_digest", fake_run_commentary)
+    commentary_path = stage_commentary_agent(tree_path, CREDENTIALS, tmp_path)
+    assert json.loads(commentary_path.read_text(encoding="utf-8")) == {
+        "chapter_title": "Board of Directors"
+    }
+    assert captured == {"model_name": "deepseek-v4-flash", "usage_limits": "unset"}
+
+
+def test_stage_commentary_docx_writes_document(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(script: Path, digest: str, docx: str) -> str:
+        captured["script"] = script.name
+        Path(docx).write_bytes(b"PK")
+        return '{"bytes": 2}'
+
+    monkeypatch.setattr("cli.pipeline.run_node_script", fake_run)
+    commentary_path = tmp_path / "commentary.json"
+    commentary_path.write_text("{}", encoding="utf-8")
+    docx_path = stage_commentary_docx(commentary_path, tmp_path, "Board of Directors")
+    assert captured["script"] == "commentary-docx.ts"
+    assert docx_path.name == "Board of Directors.docx"
+    assert docx_path.read_bytes() == b"PK"
+
+
+def test_process_chapter_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def fake_pdf_inspector(pdf: Path, work_dir: Path) -> tuple[Path, Path]:
+        markdown_path = work_dir / "source.md"
+        tree_path = work_dir / "tree.json"
+        markdown_path.write_text("# doc", encoding="utf-8")
+        tree_path.write_text("{}", encoding="utf-8")
+        return markdown_path, tree_path
+
+    def fake_agent(
+        tree: Path, credentials: Credentials, work_dir: Path, *, runner: object | None = None
+    ) -> Path:
+        commentary_path = work_dir / "commentary.json"
+        commentary_path.write_text("{}", encoding="utf-8")
+        return commentary_path
+
+    def fake_docx(digest: Path, out_dir: Path, stem: str) -> Path:
+        docx_path = out_dir / f"{stem}.docx"
+        docx_path.write_bytes(b"PK")
+        return docx_path
+
+    monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_pdf_inspector)
+    monkeypatch.setattr("cli.pipeline.stage_commentary_agent", fake_agent)
+    monkeypatch.setattr("cli.pipeline.stage_commentary_docx", fake_docx)
+
+    pdf_path = tmp_path / "Board of Directors.pdf"
+    pdf_path.write_bytes(b"%PDF")
+    outcome = process_chapter(pdf_path, tmp_path / "out", CREDENTIALS)
+
+    assert outcome.status == "ok"
+    assert outcome.docx == tmp_path / "out" / "Board of Directors.docx"
+    assert outcome.docx.is_file()
+
+
+def test_process_chapter_isolates_stage_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def failing_stage(  # pylint: disable=unused-argument
+        tree: Path, credentials: Credentials, work_dir: Path, *, runner: object | None = None
+    ) -> Path:
+        raise PipelineError("tsx-commentary-docx failed: boom")
+
+    def fake_inspector(pdf: Path, work_dir: Path) -> tuple[Path, Path]:
+        return work_dir / "s.md", work_dir / "t.json"
+
+    monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_inspector)
+    monkeypatch.setattr("cli.pipeline.stage_commentary_agent", failing_stage)
+
+    pdf_path = tmp_path / "chapter.pdf"
+    pdf_path.write_bytes(b"%PDF")
+    outcome = process_chapter(pdf_path, tmp_path / "out", CREDENTIALS)
+
+    assert outcome.status == "failed"
+    assert "boom" in (outcome.error or "")
+    assert outcome.docx is None
 
 
 def test_stage_docx_writes_document(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

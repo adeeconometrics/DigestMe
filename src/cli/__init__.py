@@ -1,6 +1,7 @@
 """Headless case-digest CLI package.
 
-Wraps the browser pipeline as a batch tool for a directory of case PDFs:
+Wraps the browser pipeline as a batch tool for a directory of case or
+commentary PDFs:
 
     cli(indir, outdir) | pdf-inspector | pydantic-agent | tsx-docx(outdir)
 
@@ -16,7 +17,7 @@ from .config import (
     CredentialError,
     normalize_model_slug,
 )
-from .pipeline import CaseOutcome, PipelineError, process_case
+from .pipeline import CaseOutcome, PipelineError, process_case, process_chapter
 from .service_queue import ServiceQueue
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "ServiceQueue",
     "normalize_model_slug",
     "process_case",
+    "process_chapter",
 ]

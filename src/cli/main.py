@@ -17,7 +17,7 @@ from functools import partial
 from pathlib import Path
 
 from .config import DEFAULT_MODEL_SLUG, CredentialError, CredentialStore, mask_key
-from .pipeline import CaseOutcome, process_case
+from .pipeline import CaseOutcome, process_case, process_chapter
 from .service_queue import ServiceQueue
 
 
@@ -40,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         default=None,
         help=f"model slug (default: {DEFAULT_MODEL_SLUG})",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("case", "commentary"),
+        default="case",
+        help="digest family: case (default) or commentary",
     )
     parser.add_argument(
         "--keep-intermediates",
@@ -86,7 +92,7 @@ def _live_progress(total: int) -> Callable[[CaseOutcome], None]:
     return report
 
 
-def _print_summary(outcomes: list[CaseOutcome]) -> None:
+def _print_summary(outcomes: list[CaseOutcome], unit: str = "cases") -> None:
     """Print one line per case in input order plus a final tally."""
     ok_count = 0
     for outcome in outcomes:
@@ -96,7 +102,7 @@ def _print_summary(outcomes: list[CaseOutcome]) -> None:
             print(f"  ok      {_format_elapsed(outcome.elapsed_ms):>8}  {outcome.docx}")
         else:
             print(f"  FAILED  {_format_elapsed(outcome.elapsed_ms):>8}  {outcome.pdf.name}: {outcome.error}")
-    print(f"\n{ok_count}/{len(outcomes)} cases digested")
+    print(f"\n{ok_count}/{len(outcomes)} {unit} digested")
 
     failed = [outcome for outcome in outcomes if outcome.status == "failed"]
     if failed:
@@ -131,10 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"model: {credentials.model_slug}  api-key: ...{mask_key(credentials.api_key)}")
 
     cases = discover_cases(args.indir)
-    print(f"digesting {len(cases)} case(s) into {args.outdir} with {args.workers} workers\n")
+    unit = "case(s)" if args.mode == "case" else "chapter(s)"
+    print(f"digesting {len(cases)} {unit} into {args.outdir} with {args.workers} workers\n")
 
     worker = partial(
-        process_case,
+        process_case if args.mode == "case" else process_chapter,
         out_dir=args.outdir,
         credentials=credentials,
         keep_intermediates=args.keep_intermediates,
@@ -150,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     outcomes = dict(results)
     ordered = [outcomes[case] for case in cases]
-    _print_summary(ordered)
+    _print_summary(ordered, unit="cases" if args.mode == "case" else "chapters")
 
     summary_path = args.outdir / "summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)

@@ -102,6 +102,38 @@ def test_main_returns_one_when_cases_fail(
     assert code == 1
 
 
+def test_main_commentary_mode_routes_to_process_chapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    routed: dict[str, object] = {}
+
+    def fake_process_chapter(  # pylint: disable=unused-argument
+        pdf: Path,
+        out_dir: Path,
+        credentials: Credentials,
+        *,
+        keep_intermediates: bool = False,
+        agent_runner: object | None = None,
+    ) -> CaseOutcome:
+        routed["called"] = True
+        out_dir.mkdir(parents=True, exist_ok=True)
+        docx = out_dir / f"{pdf.stem}.docx"
+        docx.write_bytes(b"PK")
+        return CaseOutcome(pdf=pdf, status="ok", docx=docx, elapsed_ms=5)
+
+    monkeypatch.setattr("cli.main.CredentialStore", FakeStore)
+    monkeypatch.setattr("cli.main.process_chapter", fake_process_chapter)
+
+    outdir = tmp_path / "out"
+    code = main([str(_indir(tmp_path)), str(outdir), "--mode", "commentary"])
+
+    assert code == 0
+    assert routed["called"] is True
+    output = capsys.readouterr().out
+    assert "chapter(s)" in output
+    assert "2/2 chapters digested" in output
+
+
 def test_main_rejects_missing_input_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

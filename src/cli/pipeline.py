@@ -3,6 +3,8 @@
 Stage 1 shells out to the pdf-inspector tsx script (WASM PDF -> markdown plus
 context tree), stage 2 runs the pydantic-agent digest in-process against that
 tree, and stage 3 shells out to the tsx-docx script (digest JSON -> .docx).
+Both digest families (case and commentary) share this shape; the commentary
+family runs the typed ``CommentaryDigest`` agent and its own tsx renderer.
 Intermediates live under ``<outdir>/work/<case>/`` and the final document is
 written to ``<outdir>/<case>.docx``.
 """
@@ -19,9 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from engine.agent import DIGEST_USAGE_LIMITS, build_deepseek_agent
-from engine.bridge import run_case_digest
-from engine.schemas import CaseDigestResult
+from engine.agent import DIGEST_USAGE_LIMITS, build_commentary_deepseek_agent, build_deepseek_agent
+from engine.bridge import run_case_digest, run_commentary_digest
+from engine.schemas import CaseDigestResult, CommentaryDigestResult
 
 from .config import Credentials
 
@@ -29,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_SCRIPT_DIR = Path(__file__).resolve().parent / "ts"
 PDF_INSPECTOR_SCRIPT = TS_SCRIPT_DIR / "pdf-inspector.ts"
 DOCX_SCRIPT = TS_SCRIPT_DIR / "docx.ts"
+COMMENTARY_DOCX_SCRIPT = TS_SCRIPT_DIR / "commentary-docx.ts"
 
 DEFAULT_NODE_TIMEOUT_SECONDS = 900.0
 """Generous cap for WASM parsing or DOCX packing of a large case."""
@@ -37,7 +40,10 @@ DIGEST_STAGE_TIMEOUT_SECONDS = 600.0
 """Per-case wall-clock cap (10 minutes) for the in-process agent stage."""
 
 DigestRunner = Callable[..., Coroutine[Any, Any, CaseDigestResult]]
-"""Invocable digest runner; defaults to the DeepSeek-platform engine bridge."""
+"""Invocable case-digest runner; defaults to the DeepSeek-platform engine bridge."""
+
+CommentaryRunner = Callable[..., Coroutine[Any, Any, CommentaryDigestResult]]
+"""Invocable commentary-digest runner; defaults to the DeepSeek-platform engine bridge."""
 
 
 class PipelineError(RuntimeError):
@@ -129,6 +135,36 @@ async def run_deepseek_digest(
         ) from error
 
 
+async def run_commentary_deepseek_digest(
+    root: Mapping[str, object],
+    *,
+    api_key: str,
+    model_name: str,
+) -> CommentaryDigestResult:
+    """Run one commentary digest against DeepSeek's platform API.
+
+    The commentary agent gets the same generous headless request budget and
+    10-minute wall-clock cap as case digests, sized for book-scale chapter
+    retrieval sweeps.
+    """
+    agent = build_commentary_deepseek_agent(api_key=api_key, model_name=model_name)
+    try:
+        return await asyncio.wait_for(
+            run_commentary_digest(
+                root,
+                api_key=api_key,
+                model_name=model_name,
+                agent=agent,
+                usage_limits=DIGEST_USAGE_LIMITS,
+            ),
+            timeout=DIGEST_STAGE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as error:
+        raise PipelineError(
+            f"agent stage exceeded the {DIGEST_STAGE_TIMEOUT_SECONDS:g}s per-case limit"
+        ) from error
+
+
 def stage_agent(
     tree_path: Path,
     credentials: Credentials,
@@ -151,12 +187,43 @@ def stage_agent(
     return digest_path
 
 
+def stage_commentary_agent(
+    tree_path: Path,
+    credentials: Credentials,
+    work_dir: Path,
+    *,
+    runner: CommentaryRunner | None = None,
+) -> Path:
+    """Run the structured commentary-digest agent over the context tree.
+
+    Mirrors ``stage_agent`` but writes the typed ``CommentaryDigest`` contract
+    to ``commentary.json``; the default runner targets the DeepSeek platform.
+    """
+    root: Mapping[str, object] = json.loads(tree_path.read_text(encoding="utf-8"))
+    commentary_runner = runner or run_commentary_deepseek_digest
+    result = asyncio.run(
+        commentary_runner(root, api_key=credentials.api_key, model_name=credentials.model_slug)
+    )
+    commentary_path = work_dir / "commentary.json"
+    commentary_path.write_text(result.digest.model_dump_json(indent=2), encoding="utf-8")
+    return commentary_path
+
+
 def stage_docx(digest_path: Path, out_dir: Path, stem: str) -> Path:
     """Render the digest JSON to ``<out_dir>/<stem>.docx`` via the tsx-docx script."""
     docx_path = out_dir / f"{stem}.docx"
     run_node_script(DOCX_SCRIPT, str(digest_path), str(docx_path))
     if not docx_path.is_file():
         raise PipelineError(f"tsx-docx produced no document for {stem}")
+    return docx_path
+
+
+def stage_commentary_docx(commentary_path: Path, out_dir: Path, stem: str) -> Path:
+    """Render the commentary JSON to ``<out_dir>/<stem>.docx`` via the tsx script."""
+    docx_path = out_dir / f"{stem}.docx"
+    run_node_script(COMMENTARY_DOCX_SCRIPT, str(commentary_path), str(docx_path))
+    if not docx_path.is_file():
+        raise PipelineError(f"tsx-commentary-docx produced no document for {stem}")
     return docx_path
 
 
@@ -167,18 +234,23 @@ def _work_dir(out_dir: Path, stem: str) -> Path:
     return work_dir
 
 
-def process_case(
+def _process_pdf(  # pylint: disable=too-many-arguments,too-many-locals  # family-parametrized pipeline entry
     pdf_path: Path,
     out_dir: Path,
     credentials: Credentials,
     *,
+    agent_stage: Callable[..., Path],
+    docx_stage: Callable[..., Path],
     keep_intermediates: bool = False,
-    agent_runner: DigestRunner | None = None,
+    agent_runner: DigestRunner | CommentaryRunner | None = None,
 ) -> CaseOutcome:
-    """Run the full pipeline for one case PDF, isolating failures per case.
+    """Run the shared pdf-inspector -> agent -> docx pipeline for one PDF.
 
-    Intermediate artifacts are kept when ``keep_intermediates`` is true or when
-    the case fails, so failures can be inspected in ``<out_dir>/work/<case>/``.
+    ``agent_stage`` and ``docx_stage`` select the digest family (case or
+    commentary) while failure isolation, work-dir cleanup, and timing stay
+    common. Intermediate artifacts are kept when ``keep_intermediates`` is
+    true or when the case fails, so failures can be inspected in
+    ``<out_dir>/work/<case>/``.
     """
     started_at = time.perf_counter()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -186,8 +258,8 @@ def process_case(
     work_dir = _work_dir(out_dir, stem)
     try:
         _, tree_path = stage_pdf_inspector(pdf_path, work_dir)
-        digest_path = stage_agent(tree_path, credentials, work_dir, runner=agent_runner)
-        docx_path = stage_docx(digest_path, out_dir, stem)
+        digest_path = agent_stage(tree_path, credentials, work_dir, runner=agent_runner)
+        docx_path = docx_stage(digest_path, out_dir, stem)
     except (OSError, PipelineError, json.JSONDecodeError) as error:
         elapsed_ms = round((time.perf_counter() - started_at) * 1000)
         return CaseOutcome(pdf=pdf_path, status="failed", elapsed_ms=elapsed_ms, error=str(error))
@@ -200,3 +272,48 @@ def process_case(
         shutil.rmtree(work_dir, ignore_errors=True)
     elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     return CaseOutcome(pdf=pdf_path, status="ok", docx=docx_path, elapsed_ms=elapsed_ms)
+
+
+def process_case(
+    pdf_path: Path,
+    out_dir: Path,
+    credentials: Credentials,
+    *,
+    keep_intermediates: bool = False,
+    agent_runner: DigestRunner | None = None,
+) -> CaseOutcome:
+    """Run the full case-digest pipeline for one case PDF, isolating failures per case."""
+    return _process_pdf(
+        pdf_path,
+        out_dir,
+        credentials,
+        agent_stage=stage_agent,
+        docx_stage=stage_docx,
+        keep_intermediates=keep_intermediates,
+        agent_runner=agent_runner,
+    )
+
+
+def process_chapter(
+    pdf_path: Path,
+    out_dir: Path,
+    credentials: Credentials,
+    *,
+    keep_intermediates: bool = False,
+    agent_runner: CommentaryRunner | None = None,
+) -> CaseOutcome:
+    """Run the full commentary-digest pipeline for one chapter PDF.
+
+    The commentary agent enumerates the chapter's sections with the retrieval
+    toolset, then the tsx stage renders the typed ``CommentaryDigest`` contract
+    to ``<out_dir>/<stem>.docx`` for review.
+    """
+    return _process_pdf(
+        pdf_path,
+        out_dir,
+        credentials,
+        agent_stage=stage_commentary_agent,
+        docx_stage=stage_commentary_docx,
+        keep_intermediates=keep_intermediates,
+        agent_runner=agent_runner,
+    )
