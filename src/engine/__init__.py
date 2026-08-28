@@ -32,7 +32,15 @@ from .document import (
     navigate_document_tree,
     reference_for_node,
 )
-from .schemas import CaseDigest, CaseDigestFacts, CaseDigestIssue, CaseDigestResult, ChatAnswer
+from .schemas import (
+    CaseDigest,
+    CaseDigestFacts,
+    CaseDigestIssue,
+    CaseDigestResult,
+    ChatAnswer,
+    CommentaryDigest,
+    CommentaryDigestResult,
+)
 from .search import (
     RankedSearchHit,
     RankedSearchResult,
@@ -57,6 +65,8 @@ __all__ = [
     "ChatAnswer",
     "CitationHit",
     "CitationResult",
+    "CommentaryDigest",
+    "CommentaryDigestResult",
     "DocumentContext",
     "DocumentNode",
     "DocumentReference",

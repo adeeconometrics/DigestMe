@@ -1,9 +1,9 @@
-"""Tests for the structured case-digest output contract."""
+"""Tests for the structured case-digest and commentary-digest output contracts."""
 
 import pytest
 from pydantic import ValidationError
 
-from engine.schemas import CaseDigest
+from engine.schemas import CaseDigest, CommentaryDigest, CommentaryDigestResult
 
 
 def test_typescript_digest_fixture_validates(digest_payload: dict[str, object]) -> None:
@@ -149,3 +149,101 @@ def test_misattributed_digest_types_are_rejected(digest_payload: dict[str, objec
 
     with pytest.raises(ValidationError):
         CaseDigest.model_validate(payload)
+
+
+def commentary_payload() -> dict[str, object]:
+    """A minimal but valid commentary-digest reference frame."""
+    return {
+        "source_title": "Philippine Corporate Law, Villanueva, 2019 ed.",
+        "chapter_title": "Board of Directors",
+        "sections_covered": "Secs. 21-40, RA No. 11232; former Secs. 21-39, BP 68",
+        "subject": "Corporation Law",
+    }
+
+
+def test_commentary_reference_frame_validates() -> None:
+    digest = CommentaryDigest.model_validate(commentary_payload())
+
+    assert digest.source_title == "Philippine Corporate Law, Villanueva, 2019 ed."
+    assert digest.chapter_title == "Board of Directors"
+    assert digest.sections_covered == "Secs. 21-40, RA No. 11232; former Secs. 21-39, BP 68"
+    assert digest.subject == "Corporation Law"
+
+
+def test_commentary_reference_frame_normalizes_missing_fields() -> None:
+    payload = dict(commentary_payload())
+    payload.pop("chapter_title")
+    payload["sections_covered"] = None
+
+    digest = CommentaryDigest.model_validate(payload)
+
+    assert digest.chapter_title == ""
+    assert digest.sections_covered == ""
+
+
+def test_completely_empty_commentary_digest_is_normalized() -> None:
+    digest = CommentaryDigest.model_validate({})
+
+    assert digest.model_dump() == {
+        "source_title": "",
+        "chapter_title": "",
+        "sections_covered": "",
+        "subject": "",
+    }
+
+
+def test_commentary_schema_requires_the_reference_frame() -> None:
+    schema = CommentaryDigest.model_json_schema()
+
+    assert set(schema["required"]) == {
+        "source_title",
+        "chapter_title",
+        "sections_covered",
+        "subject",
+    }
+    assert schema["properties"]["source_title"]["type"] == "string"
+    assert "empty string" in schema["properties"]["source_title"]["description"]
+
+
+def test_commentary_unknown_keys_are_ignored() -> None:
+    payload = dict(commentary_payload())
+    payload["volume"] = "not a model key"
+
+    digest = CommentaryDigest.model_validate(payload)
+
+    assert "volume" not in digest.model_dump()
+
+
+def test_commentary_misattributed_types_are_rejected() -> None:
+    payload = dict(commentary_payload())
+    payload["source_title"] = ["not a narrative string"]
+
+    with pytest.raises(ValidationError):
+        CommentaryDigest.model_validate(payload)
+
+
+def test_commentary_digest_result_wraps_digest_and_metadata() -> None:
+    result = CommentaryDigestResult.model_validate(
+        {
+            "digest": commentary_payload(),
+            "references": [],
+            "model": "deepseek-v4-flash",
+            "elapsed_ms": 120,
+        }
+    )
+
+    assert result.digest.subject == "Corporation Law"
+    assert result.references == []
+    assert result.model == "deepseek-v4-flash"
+    assert result.elapsed_ms == 120
+
+
+def test_commentary_digest_result_rejects_a_malformed_digest() -> None:
+    with pytest.raises(ValidationError):
+        CommentaryDigestResult.model_validate(
+            {
+                "digest": "not a digest",
+                "model": "deepseek-v4-flash",
+                "elapsed_ms": 120,
+            }
+        )

@@ -1,4 +1,4 @@
-"""Structured case-digest output models shared with the DOCX renderer."""
+"""Structured case-digest and commentary-digest output models shared with the renderers."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -302,6 +302,76 @@ class CaseDigestResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     digest: CaseDigest
+    references: list[DocumentReference] = Field(default_factory=list)
+    model: str
+    elapsed_ms: int = Field(ge=0)
+
+
+class CommentaryDigest(BaseModel):
+    """Complete structured output for one chapter of a legal commentary.
+
+    Every section is present in the serialized contract. Empty strings and
+    empty lists represent sections unsupported by the source and are rendered
+    as ``Not stated`` downstream. Unknown model keys are ignored so they cannot
+    reach the renderer.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_fields(cls, value: Any) -> Any:
+        """Fill unsupported top-level sections without weakening type checks."""
+        return _normalize_missing_fields(
+            value,
+            scalar_fields=(
+                "source_title",
+                "chapter_title",
+                "sections_covered",
+                "subject",
+            ),
+        )
+
+    source_title: str = Field(
+        description=(
+            "The complete title of the commentary or book, including author(s) and edition. "
+            "Use the title stated in the source document. "
+            "Return an empty string if the source does not state a title."
+        )
+    )
+    chapter_title: str = Field(
+        description=(
+            "The chapter or topical cluster of the commentary that this digest covers, "
+            "e.g. 'Board of Directors'. "
+            "State it as the source presents it. "
+            "Return an empty string if the source does not identify the covered chapter."
+        )
+    )
+    sections_covered: str = Field(
+        description=(
+            "The statutory provisions commented on in the covered chapter, normally the "
+            "section range and governing law, e.g. 'Secs. 21-40, RA No. 11232; former "
+            "Secs. 21-39, BP 68'. "
+            "Copy the identifiers from the source. "
+            "Return an empty string if the chapter is not anchored to specific provisions."
+        )
+    )
+    subject: str = Field(
+        description=(
+            "The legal subject or course area for which the digest is prepared, "
+            "e.g. 'Corporation Law'. "
+            "Use the source-provided subject or the most specific supported classification. "
+            "Return an empty string if the source does not state a subject."
+        )
+    )
+
+
+class CommentaryDigestResult(BaseModel):
+    """Structured commentary-digest output plus its source references."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    digest: CommentaryDigest
     references: list[DocumentReference] = Field(default_factory=list)
     model: str
     elapsed_ms: int = Field(ge=0)
