@@ -130,6 +130,76 @@ def fixture_long_heading_tree() -> DocumentNode:
     )
 
 
+@pytest.fixture(name="citation_tree")
+def fixture_citation_tree() -> DocumentNode:
+    """A commentary-style tree whose blocks carry inline legal citations."""
+    return DocumentNode.model_validate(
+        {
+            "id": "n0",
+            "kind": "document",
+            "label": "Corporation Law",
+            "heading": "Corporation Law",
+            "section": "Corporation Law",
+            "page": None,
+            "children": [
+                {
+                    "id": "n1",
+                    "kind": "section",
+                    "label": "SEC. 23. Board of Directors",
+                    "heading": "SEC. 23. Board of Directors",
+                    "section": "Corporation Law › SEC. 23. Board of Directors",
+                    "page": 1,
+                    "children": [
+                        {
+                            "id": "n2",
+                            "kind": "block",
+                            "label": "The board's powers were upheld in People v. Santos.",
+                            "section": "Corporation Law › SEC. 23. Board of Directors",
+                            "page": 1,
+                            "text": (
+                                "The board's powers were upheld in People v. Santos, "
+                                "G.R. No. 123456, January 15, 2001, and reaffirmed at "
+                                "G.R. No. 123456."
+                            ),
+                            "children": [],
+                        },
+                        {
+                            "id": "n3",
+                            "kind": "block",
+                            "label": "See also SEC Opinion No. 20-01.",
+                            "section": "Corporation Law › SEC. 23. Board of Directors",
+                            "page": 2,
+                            "text": "See also SEC Opinion No. 20-01 and Sec. 23, RCC; Secs. 21-40 of the same code.",
+                            "children": [],
+                        },
+                        {
+                            "id": "n4",
+                            "kind": "block",
+                            "label": "The pre-Code rule under B.P. Blg. 68 remains.",
+                            "section": "Corporation Law › SEC. 23. Board of Directors",
+                            "page": 3,
+                            "text": (
+                                "The pre-Code rule under B.P. Blg. 68 and Republic Act "
+                                "No. 11232 remains; see also G.R. No. 123456 and PD 902-A."
+                            ),
+                            "children": [],
+                        },
+                        {
+                            "id": "n5",
+                            "kind": "block",
+                            "label": "Foo Corp. vs. Bar Inc. distinguished the earlier ruling.",
+                            "section": "Corporation Law › SEC. 23. Board of Directors",
+                            "page": 4,
+                            "text": "Foo Corp. vs. Bar Inc. distinguished the earlier ruling.",
+                            "children": [],
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+
 @pytest.fixture
 def digest_payload() -> dict[str, object]:
     """Load the digest fixture consumed by the TypeScript DOCX renderer."""

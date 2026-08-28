@@ -11,6 +11,12 @@ from .agent import (
     build_deepseek_agent,
     build_openrouter_agent,
 )
+from .citations import (
+    CITATION_FAMILIES,
+    CitationHit,
+    CitationResult,
+    find_citations_in_document,
+)
 from .document import (
     DocumentNode,
     DocumentReference,
@@ -30,17 +36,20 @@ from .search import (
     search_document,
     search_document_ranked,
 )
-from .tools import DocumentContext, global_search, navigate_document, ranked_search
+from .tools import DocumentContext, find_citations, global_search, navigate_document, ranked_search
 
 __all__ = [
     "AGENT_INSTRUCTIONS",
     "CHAT_AGENT_INSTRUCTIONS",
+    "CITATION_FAMILIES",
     "DIGEST_USAGE_LIMITS",
     "CaseDigest",
     "CaseDigestFacts",
     "CaseDigestIssue",
     "CaseDigestResult",
     "ChatAnswer",
+    "CitationHit",
+    "CitationResult",
     "DocumentContext",
     "DocumentNode",
     "DocumentReference",
@@ -56,6 +65,8 @@ __all__ = [
     "build_chat_openrouter_agent",
     "build_deepseek_agent",
     "build_openrouter_agent",
+    "find_citations",
+    "find_citations_in_document",
     "find_section",
     "flatten_tree",
     "global_search",

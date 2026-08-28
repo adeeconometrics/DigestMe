@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from pydantic_ai import RunContext
 
+from .citations import CitationResult, find_citations_in_document
 from .document import (
     DocumentNode,
     DocumentReference,
@@ -113,6 +114,29 @@ def ranked_search(ctx: RunContext[DocumentContext], query: str, limit: int = 10)
     passages when exact spelling is unknown, then navigate to the top hits.
     """
     result = search_document_ranked(ctx.deps.root, query, limit)
+    for hit in result.hits:
+        ctx.deps.remember(hit.node_id)
+    return result
+
+
+def find_citations(
+    ctx: RunContext[DocumentContext],
+    family: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> CitationResult:
+    """Sweep the document for legal citations, one hit per distinct match.
+
+    ``family`` selects one citation family — ``case_number`` (G.R. No. docket
+    numbers), ``case_name`` (parties v. parties), ``sec_opinion`` (SEC opinions
+    and memorandum circulars), ``statute`` (RA/BP/PD enactments), or
+    ``cross_reference`` (in-text "Sec. N" references) — or every family when
+    omitted. Each hit carries its section and page so you can navigate to the
+    surrounding text; ``offset``/``limit`` page through matches and ``total``
+    reports how many exist. Use it to enumerate jurisprudence for the ``cases``
+    component and statutory cross-references for ``related_provisions``.
+    """
+    result = find_citations_in_document(ctx.deps.root, family, limit, offset)
     for hit in result.hits:
         ctx.deps.remember(hit.node_id)
     return result
