@@ -329,6 +329,13 @@ class CommentaryDigest(BaseModel):
                 "chapter_title",
                 "sections_covered",
                 "subject",
+                "summary",
+                "rule",
+            ),
+            list_fields=(
+                "elements",
+                "exceptions",
+                "definitions",
             ),
         )
 
@@ -362,6 +369,44 @@ class CommentaryDigest(BaseModel):
             "e.g. 'Corporation Law'. "
             "Use the source-provided subject or the most specific supported classification. "
             "Return an empty string if the source does not state a subject."
+        )
+    )
+    summary: str = Field(
+        description=(
+            "A concise narrative of what the chapter's commentary covers, letting a reader "
+            "grasp the material without reading the chapter. "
+            "Summarize the author's analysis rather than quoting it. "
+            "Return an empty string if the source does not support a summary."
+        )
+    )
+    rule: str = Field(
+        description=(
+            "The operative legal rule or doctrine stated or derived by the author for the "
+            "covered provisions. "
+            "Phrase it as a reusable proposition supported by the chapter. "
+            "Return an empty string if no rule is stated."
+        )
+    )
+    elements: list[str] = Field(
+        description=(
+            "The constituent requirements that must be present for the rule to apply. "
+            "Each item should express one distinct requirement grounded in the chapter. "
+            "Return an empty list if the source does not break the rule into elements."
+        )
+    )
+    exceptions: list[str] = Field(
+        description=(
+            "The circumstances under which the rule does not apply or is suspended. "
+            "Each item should express one distinct exception grounded in the chapter. "
+            "Return an empty list if the source states no exceptions."
+        )
+    )
+    definitions: list[str] = Field(
+        description=(
+            "Statutory terms construed or defined by the author, each item pairing the term "
+            "with its meaning, e.g. 'controlling stockholder'. "
+            "Keep each item self-contained. "
+            "Return an empty list if the source defines no terms."
         )
     )
 

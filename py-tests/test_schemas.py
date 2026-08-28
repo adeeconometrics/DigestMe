@@ -152,12 +152,17 @@ def test_misattributed_digest_types_are_rejected(digest_payload: dict[str, objec
 
 
 def commentary_payload() -> dict[str, object]:
-    """A minimal but valid commentary-digest reference frame."""
+    """A minimal but valid commentary-digest reference frame and core doctrine."""
     return {
         "source_title": "Philippine Corporate Law, Villanueva, 2019 ed.",
         "chapter_title": "Board of Directors",
         "sections_covered": "Secs. 21-40, RA No. 11232; former Secs. 21-39, BP 68",
         "subject": "Corporation Law",
+        "summary": "The chapter examines the composition, election, and powers of the board.",
+        "rule": "Corporate powers are exercised by the board as a body, not by individual directors.",
+        "elements": ["A board of at least five members", "Election by the stockholders"],
+        "exceptions": ["Acts within the ordinary course of business"],
+        "definitions": ["Controlling stockholder: one who holds sufficient shares to elect the board."],
     }
 
 
@@ -181,6 +186,28 @@ def test_commentary_reference_frame_normalizes_missing_fields() -> None:
     assert digest.sections_covered == ""
 
 
+def test_commentary_core_doctrine_validates() -> None:
+    digest = CommentaryDigest.model_validate(commentary_payload())
+
+    assert digest.rule.startswith("Corporate powers are exercised by the board")
+    assert digest.elements == ["A board of at least five members", "Election by the stockholders"]
+    assert digest.exceptions == ["Acts within the ordinary course of business"]
+    assert digest.definitions[0].startswith("Controlling stockholder")
+
+
+def test_commentary_core_doctrine_normalizes_missing_fields() -> None:
+    payload = dict(commentary_payload())
+    payload.pop("summary")
+    payload["elements"] = None
+    payload["exceptions"] = None
+
+    digest = CommentaryDigest.model_validate(payload)
+
+    assert digest.summary == ""
+    assert digest.elements == []
+    assert digest.exceptions == []
+
+
 def test_completely_empty_commentary_digest_is_normalized() -> None:
     digest = CommentaryDigest.model_validate({})
 
@@ -189,6 +216,11 @@ def test_completely_empty_commentary_digest_is_normalized() -> None:
         "chapter_title": "",
         "sections_covered": "",
         "subject": "",
+        "summary": "",
+        "rule": "",
+        "elements": [],
+        "exceptions": [],
+        "definitions": [],
     }
 
 
@@ -200,9 +232,16 @@ def test_commentary_schema_requires_the_reference_frame() -> None:
         "chapter_title",
         "sections_covered",
         "subject",
+        "summary",
+        "rule",
+        "elements",
+        "exceptions",
+        "definitions",
     }
     assert schema["properties"]["source_title"]["type"] == "string"
     assert "empty string" in schema["properties"]["source_title"]["description"]
+    assert schema["properties"]["elements"]["items"]["type"] == "string"
+    assert "empty list" in schema["properties"]["elements"]["description"]
 
 
 def test_commentary_unknown_keys_are_ignored() -> None:
@@ -217,6 +256,12 @@ def test_commentary_unknown_keys_are_ignored() -> None:
 def test_commentary_misattributed_types_are_rejected() -> None:
     payload = dict(commentary_payload())
     payload["source_title"] = ["not a narrative string"]
+
+    with pytest.raises(ValidationError):
+        CommentaryDigest.model_validate(payload)
+
+    payload = dict(commentary_payload())
+    payload["elements"] = "not a list"
 
     with pytest.raises(ValidationError):
         CommentaryDigest.model_validate(payload)
