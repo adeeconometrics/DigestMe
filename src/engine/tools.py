@@ -12,7 +12,7 @@ from .document import (
     navigate_document_tree,
     reference_for_node,
 )
-from .search import SearchResult, search_document
+from .search import RankedSearchResult, SearchResult, search_document, search_document_ranked
 
 
 REFERENCE_LIMIT = 8
@@ -83,6 +83,20 @@ def global_search(ctx: RunContext[DocumentContext], pattern: str, limit: int = 1
     with the returned section path to retrieve the surrounding context before reasoning.
     """
     result = search_document(ctx.deps.root, pattern, limit)
+    for hit in result.hits:
+        ctx.deps.remember(hit.node_id)
+    return result
+
+
+def ranked_search(ctx: RunContext[DocumentContext], query: str, limit: int = 10) -> RankedSearchResult:
+    """Rank every section and block by plain term overlap with the query.
+
+    Unlike ``global_search``, this tolerates paraphrase: tokens are scored by
+    presence and frequency across node text, labels, and section paths, so a
+    query can use different words than the source. Use it to locate the best
+    passages when exact spelling is unknown, then navigate to the top hits.
+    """
+    result = search_document_ranked(ctx.deps.root, query, limit)
     for hit in result.hits:
         ctx.deps.remember(hit.node_id)
     return result

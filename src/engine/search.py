@@ -36,6 +36,22 @@ class SearchResult(BaseModel):
     error: str | None = None
 
 
+class RankedSearchHit(SearchHit):
+    """A term-overlap match with the score that produced its ranking."""
+
+    score: float
+
+
+class RankedSearchResult(BaseModel):
+    """Ranked term-overlap search output, with the full match count."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    query: str
+    hits: list[RankedSearchHit] = Field(default_factory=list)
+    total: int = 0
+
+
 def _snippet(value: str, match: re.Match[str], limit: int = 180) -> str:
     """Keep a useful window around a match while bounding tool output."""
     if len(value) <= limit:
@@ -96,3 +112,86 @@ def search_document(root: DocumentNode, pattern: str, limit: int = 10) -> Search
             break
 
     return SearchResult(pattern=pattern, hits=hits)
+
+
+def _tokenize(query: str) -> list[str]:
+    """Lowercase, strip punctuation, and dedupe tokens of at least three chars."""
+    cleaned = re.sub(r"[^a-z0-9\s-]", " ", query.lower())
+    return list(dict.fromkeys(token for token in cleaned.split() if len(token) >= 3))
+
+
+def _count_occurrences(haystack: str, needle: str) -> int:
+    """Count non-overlapping substring occurrences, mirroring the browser scorer."""
+    count = 0
+    at = haystack.find(needle)
+    while at >= 0:
+        count += 1
+        at = haystack.find(needle, at + len(needle))
+    return count
+
+
+def _snippet_ranked(source: str, limit: int = 140) -> str:
+    """Keep the leading window of a ranked hit, matching the browser preview."""
+    if len(source) <= limit:
+        return source
+    return f"{source[: limit - 1]}…"
+
+
+def search_document_ranked(root: DocumentNode, query: str, limit: int = 10) -> RankedSearchResult:
+    """Score every tree node with plain term overlap — no network, no model.
+
+    Mirrors the browser-side ``retrieveNodes`` scorer used by local chat:
+    longer tokens weigh more, exact phrases get a boost, and section paths
+    contribute half weight so headings can be found by name. Paraphrase-tolerant
+    where ``search_document``'s regex requires an exact spelling.
+    """
+    tokens = _tokenize(query)
+    if not tokens:
+        return RankedSearchResult(query=query)
+
+    phrase = " ".join(tokens)
+    ranked: list[RankedSearchHit] = []
+
+    for node in flatten_tree(root):
+        if node.kind == "document":
+            continue
+
+        body = (node.text or node.label or "").lower()
+        path = (node.section or "").lower()
+
+        score = 0
+        matched_field: SearchField = "label"
+        for token in tokens:
+            in_body = _count_occurrences(body, token)
+            if in_body > 0:
+                score += in_body * len(token)
+                matched_field = "text"
+            elif token in path:
+                score += (len(token) + 1) // 2
+                if matched_field == "label":
+                    matched_field = "section"
+
+        # Exact phrase presence is the strongest signal; near-phrase follows.
+        if phrase in body:
+            score += len(phrase) + 8
+        elif len(tokens) > 1 and all(token in body for token in tokens):
+            score += 6
+
+        if score <= 0:
+            continue
+
+        source = (node.text or node.label or "").strip()
+        ranked.append(
+            RankedSearchHit(
+                node_id=node.id,
+                label=node.label,
+                section=node.section,
+                page=node.page,
+                snippet=_snippet_ranked(source),
+                matched_field=matched_field,
+                score=float(score),
+            )
+        )
+
+    ranked.sort(key=lambda hit: hit.score, reverse=True)
+    return RankedSearchResult(query=query, hits=ranked[:limit], total=len(ranked))

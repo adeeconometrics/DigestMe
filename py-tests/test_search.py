@@ -1,7 +1,7 @@
-"""Tests for global regex search and source references."""
+"""Tests for global regex search, ranked term-overlap search, and source references."""
 
 from engine.document import DocumentNode
-from engine.search import search_document
+from engine.search import search_document, search_document_ranked
 
 
 def test_search_returns_nested_text_with_section_and_page(document_tree: DocumentNode) -> None:
@@ -42,3 +42,41 @@ def test_search_reports_invalid_or_empty_patterns(document_tree: DocumentNode) -
     assert invalid.hits == []
     assert invalid.error is not None
     assert empty.error == "Search pattern must not be empty."
+
+
+def test_ranked_search_ranks_exact_phrase_matches_first(document_tree: DocumentNode) -> None:
+    result = search_document_ranked(document_tree, "written notice")
+
+    assert result.query == "written notice"
+    assert result.total == 1
+    assert result.hits[0].node_id == "n3"
+    assert result.hits[0].matched_field == "text"
+    assert result.hits[0].snippet == "The written notice preceded the hearing."
+    assert result.hits[0].score > 0
+
+
+def test_ranked_search_boosts_body_over_section_paths(document_tree: DocumentNode) -> None:
+    result = search_document_ranked(document_tree, "ruling")
+
+    # n5 matches its own label as body text; n6 only via its section path (half weight).
+    assert [hit.node_id for hit in result.hits] == ["n5", "n6"]
+    assert result.hits[0].matched_field == "text"
+    assert result.hits[1].matched_field == "section"
+    assert result.hits[0].score > result.hits[1].score
+
+
+def test_ranked_search_reports_total_before_applying_limit(document_tree: DocumentNode) -> None:
+    limited = search_document_ranked(document_tree, "the", limit=1)
+
+    assert len(limited.hits) == 1
+    assert limited.total == 3
+
+
+def test_ranked_search_returns_empty_for_no_match_or_empty_query(document_tree: DocumentNode) -> None:
+    missing = search_document_ranked(document_tree, "not-present")
+    empty = search_document_ranked(document_tree, "")
+
+    assert missing.hits == []
+    assert missing.total == 0
+    assert empty.hits == []
+    assert empty.total == 0

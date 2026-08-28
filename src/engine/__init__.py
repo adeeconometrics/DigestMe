@@ -22,8 +22,15 @@ from .document import (
     reference_for_node,
 )
 from .schemas import CaseDigest, CaseDigestFacts, CaseDigestIssue, CaseDigestResult, ChatAnswer
-from .search import SearchHit, SearchResult, search_document
-from .tools import DocumentContext, global_search, navigate_document
+from .search import (
+    RankedSearchHit,
+    RankedSearchResult,
+    SearchHit,
+    SearchResult,
+    search_document,
+    search_document_ranked,
+)
+from .tools import DocumentContext, global_search, navigate_document, ranked_search
 
 __all__ = [
     "AGENT_INSTRUCTIONS",
@@ -39,6 +46,8 @@ __all__ = [
     "DocumentReference",
     "NavigationEntry",
     "NavigationResult",
+    "RankedSearchHit",
+    "RankedSearchResult",
     "SearchHit",
     "SearchResult",
     "build_agent",
@@ -52,6 +61,8 @@ __all__ = [
     "global_search",
     "navigate_document",
     "navigate_document_tree",
+    "ranked_search",
     "reference_for_node",
     "search_document",
+    "search_document_ranked",
 ]
