@@ -73,7 +73,7 @@ def _snippet(value: str, match: re.Match[str], limit: int = 180) -> str:
 def search_document(
     root: DocumentNode,
     pattern: str,
-    limit: int = 10,
+    limit: int = 20,
     offset: int = 0,
 ) -> SearchResult:
     """Search node text, labels, section paths, and headings with a case-insensitive regex.
@@ -152,7 +152,7 @@ def _snippet_ranked(source: str, limit: int = 140) -> str:
     return f"{source[: limit - 1]}…"
 
 
-def search_document_ranked(root: DocumentNode, query: str, limit: int = 10) -> RankedSearchResult:
+def search_document_ranked(root: DocumentNode, query: str, limit: int = 20) -> RankedSearchResult:
     """Score every tree node with plain term overlap — no network, no model.
 
     Mirrors the browser-side ``retrieveNodes`` scorer used by local chat:

@@ -16,7 +16,8 @@ from .document import (
 from .search import RankedSearchResult, SearchResult, search_document, search_document_ranked
 
 
-REFERENCE_LIMIT = 8
+REFERENCE_LIMIT = 16
+"""Cap on remembered source references, sized for chapter-scale digests."""
 
 
 @dataclass
@@ -64,6 +65,10 @@ def _flatten_without_root(root: DocumentNode) -> list[DocumentNode]:
     return nodes
 
 
+SEARCH_LIMIT = 20
+"""Default tool search window, generous enough for book-scale retrieval sweeps."""
+
+
 def navigate_document(
     ctx: RunContext[DocumentContext],
     section_path: str | None = None,
@@ -89,7 +94,7 @@ def navigate_document(
 def global_search(
     ctx: RunContext[DocumentContext],
     pattern: str,
-    limit: int = 10,
+    limit: int = SEARCH_LIMIT,
     offset: int = 0,
 ) -> SearchResult:
     """Search the document with a case-insensitive regex when section labels are insufficient.
@@ -105,7 +110,7 @@ def global_search(
     return result
 
 
-def ranked_search(ctx: RunContext[DocumentContext], query: str, limit: int = 10) -> RankedSearchResult:
+def ranked_search(ctx: RunContext[DocumentContext], query: str, limit: int = SEARCH_LIMIT) -> RankedSearchResult:
     """Rank every section and block by plain term overlap with the query.
 
     Unlike ``global_search``, this tolerates paraphrase: tokens are scored by
