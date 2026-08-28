@@ -2,24 +2,46 @@ import type { WireValue } from "../types";
 import { isWireString } from "../types";
 import {
   AlignmentType,
-  BorderStyle,
   Document,
   ExternalHyperlink,
   Footer,
   Header,
-  HeightRule,
   Packer,
   Paragraph,
-  ShadingType,
   Table,
   TableCell,
-  TableLayoutType,
   TableRow,
   TextRun,
   VerticalAlignTable,
-  WidthType,
 } from "docx";
-import type { FileChild, IParagraphOptions, ISectionOptions, ParagraphChild, TableVerticalAlign } from "docx";
+import type { FileChild, ISectionOptions } from "docx";
+import {
+  BODY_FONT,
+  BODY_SIZE,
+  BODY_SPACING,
+  COMPACT_CELL_MARGINS,
+  CONTENT_CELL_MARGINS,
+  DETAILS_CELL_MARGINS,
+  JUSTIFIED_CELL_TEXT,
+  SUBHEADER_FILL,
+  TABLE_WIDTH,
+  WHITE_FILL,
+  bulletParagraph,
+  cell,
+  contentParagraphs,
+  detailsValueCell,
+  headingCell,
+  labelledCell,
+  listParagraphs,
+  nonEmptyLines,
+  paragraph,
+  row,
+  subheading,
+  table,
+  tableSpacer,
+  textParagraph,
+  isBulletLine,
+} from "./docxTheme";
 
 /**
  * Facts are grouped to mirror the FACTS section in the case-digest template.
@@ -71,32 +93,6 @@ export interface CaseDigestDownloadOptions extends CaseDigestDocxOptions {
   fileName?: string;
 }
 
-interface TextStyle {
-  bold?: boolean;
-  italics?: boolean;
-  color?: string;
-}
-
-interface CellOptions {
-  fill?: string;
-  columnSpan?: number;
-  width?: number;
-  margins?: {
-    top?: number;
-    bottom?: number;
-    left?: number;
-    right?: number;
-  };
-  verticalAlign?: TableVerticalAlign;
-}
-
-const BODY_FONT = "Arial";
-const BODY_SIZE = 20;
-const DARK_FILL = "666666";
-const LABEL_FILL = "d9d9d9";
-const SUBHEADER_FILL = "cccccc";
-const WHITE_FILL = "ffffff";
-const TABLE_WIDTH = 10466;
 const DETAILS_TABLE_WIDTH = 10455;
 const FACTS_TABLE_WIDTH = 10455;
 const ARGUMENTS_TABLE_WIDTH = 10440;
@@ -105,32 +101,7 @@ const DETAILS_COLUMN_WIDTHS = [1845, 4590, 1695, 2325];
 const FACTS_COLUMN_WIDTHS = [1365, 9090];
 const ARGUMENTS_COLUMN_WIDTHS = [5235, 5205];
 const ISSUE_COLUMN_WIDTHS = [1455, 8985];
-const BODY_SPACING = { after: 120, line: 240, lineRule: "auto" as const };
-const HEADING_SPACING = { after: 0, line: 192, lineRule: "auto" as const };
-const SUBHEADING_SPACING = { before: 120, after: 80, line: 240, lineRule: "auto" as const };
-const DETAILS_CELL_MARGINS = { top: 80, left: 80, bottom: 80, right: 80 };
-const CONTENT_CELL_MARGINS = { top: 100, left: 100, bottom: 100, right: 100 };
-const COMPACT_CELL_MARGINS = { top: 0, left: 108, bottom: 0, right: 108 };
 const ISSUE_CELL_MARGINS = { top: 99, left: 99, bottom: 99, right: 99 };
-const TABLE_BORDER = { style: BorderStyle.SINGLE, color: "000000", size: 8, space: 0 };
-const TABLE_BORDERS = {
-  top: TABLE_BORDER,
-  left: TABLE_BORDER,
-  bottom: TABLE_BORDER,
-  right: TABLE_BORDER,
-  insideHorizontal: TABLE_BORDER,
-  insideVertical: TABLE_BORDER,
-};
-const CELL_BORDERS = {
-  top: TABLE_BORDER,
-  left: TABLE_BORDER,
-  bottom: TABLE_BORDER,
-  right: TABLE_BORDER,
-};
-const JUSTIFIED_CELL_TEXT: IParagraphOptions = {
-  alignment: AlignmentType.JUSTIFIED,
-  spacing: BODY_SPACING,
-};
 
 function isRecord(value: WireValue): value is Record<string, WireValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -238,152 +209,6 @@ export function parseCaseDigestJson(input: WireValue): CaseDigest {
   };
 }
 
-function textRun(text: string, style: TextStyle = {}): TextRun {
-  return new TextRun({
-    text,
-    font: BODY_FONT,
-    size: BODY_SIZE,
-    ...style,
-  });
-}
-
-/** Word merges adjacent tables, so every section table needs a spacer paragraph. */
-function tableSpacer(): Paragraph {
-  return new Paragraph({ children: [] });
-}
-
-function paragraph(children: readonly ParagraphChild[], options: IParagraphOptions = {}): Paragraph {
-  return new Paragraph({
-    spacing: BODY_SPACING,
-    ...options,
-    children,
-  });
-}
-
-function textParagraph(text: string, style: TextStyle = {}, options: IParagraphOptions = {}): Paragraph {
-  return paragraph([textRun(text, style)], options);
-}
-
-function nonEmptyLines(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function stripBullet(text: string): string {
-  return text.replace(/^(?:[-*]|\u2022)\s+/, "");
-}
-
-function isBulletLine(text: string): boolean {
-  return /^(?:[-*]|\u2022)\s+/.test(text);
-}
-
-function bulletParagraph(
-  text: string,
-  style: TextStyle = {},
-  options: IParagraphOptions = {},
-): Paragraph {
-  return paragraph([textRun(stripBullet(text), style)], { ...options, bullet: { level: 0 } });
-}
-
-function contentParagraphs(
-  text: string | undefined,
-  style: TextStyle = {},
-  options: IParagraphOptions = {},
-): Paragraph[] {
-  return nonEmptyLines(text ?? "").map((line) => (
-    isBulletLine(line) ? bulletParagraph(line, style, options) : textParagraph(line, style, options)
-  ));
-}
-
-function labelledBulletParagraph(text: string, options: IParagraphOptions = {}): Paragraph {
-  const value = stripBullet(text);
-  const separatorIndex = value.indexOf(":");
-  if (separatorIndex <= 0) {
-    return bulletParagraph(value, {}, options);
-  }
-
-  return paragraph([
-    textRun(value.slice(0, separatorIndex + 1), { bold: true }),
-    textRun(value.slice(separatorIndex + 1), { bold: true }),
-  ], { ...options, bullet: { level: 0 } });
-}
-
-function listParagraphs(
-  items: string[] | undefined,
-  labelled = false,
-  options: IParagraphOptions = {},
-): Paragraph[] {
-  return (items ?? []).flatMap((item) => nonEmptyLines(item).map((line) => (
-    labelled ? labelledBulletParagraph(line, options) : bulletParagraph(line, {}, options)
-  )));
-}
-
-function subheading(title: string, italics = false): Paragraph {
-  return textParagraph(title, { bold: true, italics }, {
-    spacing: SUBHEADING_SPACING,
-    keepNext: true,
-  });
-}
-
-function headingParagraph(title: string): Paragraph {
-  return textParagraph(title.toUpperCase(), { bold: true, color: "ffffff" }, {
-    spacing: HEADING_SPACING,
-    keepNext: true,
-  });
-}
-
-function cell(children: readonly (Paragraph | Table)[], options: CellOptions = {}): TableCell {
-  return new TableCell({
-    children: children.length > 0 ? children : [textParagraph("")],
-    borders: CELL_BORDERS,
-    columnSpan: options.columnSpan,
-    margins: options.margins ?? CONTENT_CELL_MARGINS,
-    shading: options.fill ? { fill: options.fill, type: ShadingType.CLEAR } : undefined,
-    verticalAlign: options.verticalAlign,
-    width: options.width === undefined ? undefined : { size: options.width, type: WidthType.DXA },
-  });
-}
-
-function row(children: readonly TableCell[], height?: number): TableRow {
-  return new TableRow(
-    height === undefined
-      ? { children }
-      : { children, height: { value: height, rule: HeightRule.ATLEAST } },
-  );
-}
-
-function table(rows: readonly TableRow[], columnWidths: number[], width: number): Table {
-  return new Table({
-    rows,
-    width: { size: width, type: WidthType.DXA },
-    columnWidths,
-    layout: TableLayoutType.FIXED,
-    borders: TABLE_BORDERS,
-    indent: { size: 3, type: WidthType.DXA },
-  });
-}
-
-function headingCell(title: string, columnSpan?: number, margins = CONTENT_CELL_MARGINS): TableCell {
-  return cell([headingParagraph(title)], {
-    fill: DARK_FILL,
-    columnSpan,
-    margins,
-  });
-}
-
-function labelledCell(label: string, fill = LABEL_FILL): TableCell {
-  return cell([
-    textParagraph(label, { bold: true }, { spacing: { after: 0, line: 227, lineRule: "auto" } }),
-  ], { fill, margins: DETAILS_CELL_MARGINS });
-}
-
-function detailsValueCell(value: string | undefined, style: TextStyle = {}): TableCell {
-  const paragraphs = contentParagraphs(value, style);
-  return cell(paragraphs, { margins: DETAILS_CELL_MARGINS });
-}
-
 function isUrl(value: string): boolean {
   return /^https?:\/\/\S+$/i.test(value.trim());
 }
@@ -468,7 +293,7 @@ function provisionsTable(caseDigest: CaseDigest): Table {
 
 function factsTable(caseDigest: CaseDigest): Table {
   const factsNode = caseDigest.facts;
-  const facts: Paragraph[] = listParagraphs(factsNode.petition, false, JUSTIFIED_CELL_TEXT);
+  const facts = listParagraphs(factsNode.petition, false, JUSTIFIED_CELL_TEXT);
   if (factsNode.respondent_version.length > 0) {
     facts.push(subheading("Respondent\u2019s version", true));
     facts.push(...listParagraphs(factsNode.respondent_version, false, JUSTIFIED_CELL_TEXT));
