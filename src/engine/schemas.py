@@ -375,6 +375,7 @@ class CommentaryDigest(BaseModel):
                 "subject",
                 "summary",
                 "rule",
+                "legislative_history",
             ),
             list_fields=(
                 "elements",
@@ -383,6 +384,10 @@ class CommentaryDigest(BaseModel):
                 "cases",
                 "implementing_rules",
                 "related_provisions",
+                "debates",
+                "practice_pointers",
+                "illustrations",
+                "study_notes",
             ),
         )
 
@@ -479,6 +484,45 @@ class CommentaryDigest(BaseModel):
             "Each item should identify the provision and its connection to the covered "
             "material. "
             "Return an empty list if the source states no cross-references."
+        )
+    )
+    legislative_history: str = Field(
+        description=(
+            "The evolution of the covered provisions from prior enactments to the current "
+            "law, e.g. from B.P. Blg. 68 to RA No. 11232, and the reasons for change. "
+            "Ground it in the chapter's discussion. "
+            "Return an empty string if the source does not discuss legislative history."
+        )
+    )
+    debates: list[str] = Field(
+        description=(
+            "Points of contested interpretation or diverging views in jurisprudence or "
+            "among commentators. "
+            "Each item should state the dispute and the competing positions. "
+            "Return an empty list if the source records no debates."
+        )
+    )
+    practice_pointers: list[str] = Field(
+        description=(
+            "Practical guidance the author gives to practitioners, such as procedures, "
+            "forms, fees, or timelines. "
+            "Each item should capture one pointer. "
+            "Return an empty list if the source offers none."
+        )
+    )
+    illustrations: list[str] = Field(
+        description=(
+            "Hypotheticals or worked examples the author uses to explain the rule. "
+            "Each item should capture one illustration and the point it makes. "
+            "Return an empty list if the source uses none."
+        )
+    )
+    study_notes: list[str] = Field(
+        description=(
+            "Short study notes highlighting the most useful takeaways from the chapter. "
+            "Each item should be a distinct, source-grounded rule, connection, or "
+            "exam-relevant observation. "
+            "Return an empty list if no study notes are supported."
         )
     )
 

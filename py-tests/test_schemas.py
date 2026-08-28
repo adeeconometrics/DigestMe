@@ -172,6 +172,11 @@ def commentary_payload() -> dict[str, object]:
         ],
         "implementing_rules": ["SEC MC No. 28, s. 2020 on board composition"],
         "related_provisions": ["Sec. 23, RA 11232 and Sec. 30 on removal"],
+        "legislative_history": "The RCC reworked the board powers that B.P. Blg. 68 originally stated.",
+        "debates": ["Commentators split on whether the veil may be pierced for a single proprietorship."],
+        "practice_pointers": ["File the general information sheet within thirty days of the annual meeting."],
+        "illustrations": ["A director who votes in favor of an ultra vires act may be solidarily liable."],
+        "study_notes": ["The board acts only as a body; individual directors have no independent powers."],
     }
 
 
@@ -250,6 +255,29 @@ def test_commentary_authorities_normalize_missing_fields() -> None:
     assert digest.related_provisions == []
 
 
+def test_commentary_author_contribution_validates() -> None:
+    digest = CommentaryDigest.model_validate(commentary_payload())
+
+    assert digest.legislative_history.startswith("The RCC reworked the board powers")
+    assert digest.debates[0].startswith("Commentators split")
+    assert digest.practice_pointers[0].startswith("File the general information sheet")
+    assert digest.illustrations[0].startswith("A director who votes")
+    assert digest.study_notes[0].startswith("The board acts only as a body")
+
+
+def test_commentary_author_contribution_normalizes_missing_fields() -> None:
+    payload = dict(commentary_payload())
+    payload.pop("legislative_history")
+    payload["debates"] = None
+    payload["study_notes"] = None
+
+    digest = CommentaryDigest.model_validate(payload)
+
+    assert digest.legislative_history == ""
+    assert digest.debates == []
+    assert digest.study_notes == []
+
+
 def test_completely_empty_commentary_digest_is_normalized() -> None:
     digest = CommentaryDigest.model_validate({})
 
@@ -266,6 +294,11 @@ def test_completely_empty_commentary_digest_is_normalized() -> None:
         "cases": [],
         "implementing_rules": [],
         "related_provisions": [],
+        "legislative_history": "",
+        "debates": [],
+        "practice_pointers": [],
+        "illustrations": [],
+        "study_notes": [],
     }
 
 
@@ -285,6 +318,11 @@ def test_commentary_schema_requires_the_reference_frame() -> None:
         "cases",
         "implementing_rules",
         "related_provisions",
+        "legislative_history",
+        "debates",
+        "practice_pointers",
+        "illustrations",
+        "study_notes",
     }
     assert schema["properties"]["source_title"]["type"] == "string"
     assert "empty string" in schema["properties"]["source_title"]["description"]
@@ -295,6 +333,10 @@ def test_commentary_schema_requires_the_reference_frame() -> None:
     assert set(case_schema["required"]) == {"case_name", "citation", "doctrine"}
     assert case_schema["properties"]["case_name"]["type"] == "string"
     assert "empty string" in case_schema["properties"]["case_name"]["description"]
+
+    assert "empty string" in schema["properties"]["legislative_history"]["description"]
+    for field_name in ("debates", "practice_pointers", "illustrations", "study_notes"):
+        assert "empty list" in schema["properties"][field_name]["description"]
 
 
 def test_commentary_case_misattributed_shapes_are_rejected() -> None:
