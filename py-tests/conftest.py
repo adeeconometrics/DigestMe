@@ -205,3 +205,33 @@ def digest_payload() -> dict[str, object]:
     """Load the digest fixture consumed by the TypeScript DOCX renderer."""
     fixture_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "case-digest.mock.json"
     return cast(dict[str, object], json.loads(fixture_path.read_text(encoding="utf-8")))
+
+
+@pytest.fixture(name="commentary_digest_payload")
+def fixture_commentary_digest_payload() -> dict[str, object]:
+    """Return a minimal valid commentary-digest payload for bridge tests."""
+    return {
+        "source_title": "Philippine Corporate Law, Villanueva, 2019 ed.",
+        "chapter_title": "Board of Directors",
+        "sections_covered": "Secs. 21-40, RA No. 11232",
+        "subject": "Corporation Law",
+        "summary": "The chapter examines the board.",
+        "rule": "Corporate powers are exercised by the board as a body.",
+        "elements": ["A board of at least five members"],
+        "exceptions": ["Acts within the ordinary course of business"],
+        "definitions": ["Controlling stockholder: one who holds sufficient shares."],
+        "cases": [
+            {
+                "case_name": "Villanueva v. Bayside Port Workers Cooperative",
+                "citation": "G.R. No. 123456, January 15, 2001",
+                "doctrine": "Directors cannot bind the corporation outside board authority.",
+            }
+        ],
+        "implementing_rules": ["SEC MC No. 28, s. 2020 on board composition"],
+        "related_provisions": ["Sec. 23, RA 11232 and Sec. 30 on removal"],
+        "legislative_history": "The RCC reworked the board powers.",
+        "debates": ["Commentators split on veil piercing."],
+        "practice_pointers": ["File the GIS within thirty days."],
+        "illustrations": ["A director voting for an ultra vires act may be liable."],
+        "study_notes": ["The board acts only as a body."],
+    }

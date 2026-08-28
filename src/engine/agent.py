@@ -15,7 +15,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
-from .schemas import CaseDigest
+from .schemas import CaseDigest, CommentaryDigest
 from .tools import (
     DocumentContext,
     find_citations,
@@ -86,7 +86,10 @@ Ground every field in the source and preserve section and page references.
 Do not invent authorities: report only the cases, laws, and SEC rules the source
 actually cites, and say when the source is silent.
 Keep each field concise enough that the whole digest fits in one response; use no more
-than six items in any list.
+than six items in any list and no more than four case objects in ``cases``.
+Always return every field defined by the output schema. Never omit a field and never use null:
+return an empty string ("") for an unsupported scalar, an empty list ([]) for an unsupported list,
+and an array of case objects each containing case_name, citation, and doctrine.
 Return only the digest fields defined by your output schema; never add extra keys.
 """
 
@@ -123,17 +126,18 @@ def build_chat_agent(model: Model | str | None = None) -> Agent[DocumentContext,
     )
 
 
-def build_commentary_agent(model: Model | str | None = None) -> Agent[DocumentContext, str]:
-    """Build a commentary-digest agent with the full retrieval toolset.
+def build_commentary_agent(model: Model | str | None = None) -> Agent[DocumentContext, CommentaryDigest]:
+    """Build the structured commentary-digest agent with the full retrieval toolset.
 
-    The agent returns a chapter digest as text for now; a typed
-    ``CommentaryDigest`` output schema will replace ``str`` when it lands.
+    The agent fills every field of the typed ``CommentaryDigest`` contract for
+    one supplied commentary chapter, using navigation, search, and citation
+    sweeps before writing any digest field.
     """
     return Agent(
         model=model,
         name="commentary-digest-engine",
         deps_type=DocumentContext,
-        output_type=str,
+        output_type=CommentaryDigest,
         model_settings=AGENT_MODEL_SETTINGS,
         retries=AGENT_RETRIES,
         instructions=COMMENTARY_AGENT_INSTRUCTIONS,
@@ -253,7 +257,7 @@ def build_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentCont
     return build_agent(_deepseek_model(api_key=api_key, model_name=model_name))
 
 
-def build_commentary_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
+def build_commentary_deepseek_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, CommentaryDigest]:
     """Build the commentary agent backed by the DeepSeek platform."""
     return build_commentary_agent(_deepseek_model(api_key=api_key, model_name=model_name))
 
@@ -273,7 +277,7 @@ def build_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentCo
     return build_agent(_openrouter_model(api_key=api_key, model_name=model_name))
 
 
-def build_commentary_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, str]:
+def build_commentary_openrouter_agent(*, api_key: str, model_name: str) -> Agent[DocumentContext, CommentaryDigest]:
     """Build the commentary agent backed by OpenRouter."""
     return build_commentary_agent(_openrouter_model(api_key=api_key, model_name=model_name))
 

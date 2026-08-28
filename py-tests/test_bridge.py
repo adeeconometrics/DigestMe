@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RequestUsage
 from pydantic_core import ValidationError
 
-from engine.agent import build_agent, build_chat_agent
+from engine.agent import build_agent, build_chat_agent, build_commentary_agent
 from engine.bridge import (
     AgentRunError,
     _bind_stream_request_id,
@@ -22,6 +22,7 @@ from engine.bridge import (
     run_case_digest,
     run_chat,
     run_chat_stream,
+    run_commentary_digest,
 )
 from engine.document import DocumentNode
 
@@ -161,6 +162,85 @@ def test_run_chat_rejects_empty_questions(document_tree: DocumentNode) -> None:
                 "  ",
                 api_key="unused-in-test",
                 model_name="test/chat",
+                agent=agent,
+            )
+        )
+
+
+def test_run_commentary_digest_preserves_structured_output_and_references(
+    document_tree: DocumentNode,
+    commentary_digest_payload: dict[str, object],
+) -> None:
+    agent = build_commentary_agent(
+        TestModel(
+            call_tools=["navigate_document"],
+            custom_output_args=commentary_digest_payload,
+            model_name="test-commentary",
+        )
+    )
+
+    result = asyncio.run(
+        run_commentary_digest(
+            document_tree,
+            api_key="unused-in-test",
+            model_name="test/commentary",
+            agent=agent,
+        )
+    )
+
+    assert result.digest.chapter_title == "Board of Directors"
+    assert result.digest.cases[0].citation == "G.R. No. 123456, January 15, 2001"
+    assert result.model == "test/commentary"
+    assert result.elapsed_ms >= 0
+    assert result.references
+
+
+def test_run_commentary_digest_normalizes_sparse_structured_output(document_tree: DocumentNode) -> None:
+    agent = build_commentary_agent(TestModel(custom_output_args={}, model_name="test-commentary"))
+
+    result = asyncio.run(
+        run_commentary_digest(
+            document_tree,
+            api_key="unused-in-test",
+            model_name="test/commentary",
+            agent=agent,
+        )
+    )
+
+    expected_digest = {
+        "source_title": "",
+        "chapter_title": "",
+        "sections_covered": "",
+        "subject": "",
+        "summary": "",
+        "rule": "",
+        "elements": [],
+        "exceptions": [],
+        "definitions": [],
+        "cases": [],
+        "implementing_rules": [],
+        "related_provisions": [],
+        "legislative_history": "",
+        "debates": [],
+        "practice_pointers": [],
+        "illustrations": [],
+        "study_notes": [],
+    }
+
+    assert result.digest.model_dump() == expected_digest
+    assert json.loads(result.model_dump_json())["digest"] == expected_digest
+
+
+def test_run_commentary_digest_translates_invalid_output_retries(document_tree: DocumentNode) -> None:
+    """A commentary digest that never validates names the field that kept failing."""
+    agent = build_commentary_agent(TestModel(custom_output_args={"rule": 12345}, model_name="test-commentary"))
+
+    with pytest.raises(AgentRunError, match=r"could not produce a valid result.*rule"):
+        asyncio.run(
+            run_commentary_digest(
+                document_tree,
+                api_key="unused-in-test",
+                model_name="test/commentary",
                 agent=agent,
             )
         )

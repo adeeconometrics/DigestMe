@@ -21,7 +21,7 @@ import { classifyRuntimeMarker, normalizeSitePackagesPath } from "./runtimeStore
 
 interface WorkerRunRequest {
   requestId: number;
-  command: "chat" | "digest";
+  command: "chat" | "digest" | "commentary";
   root: unknown;
   question?: string;
   stream?: boolean;
@@ -87,7 +87,7 @@ function isRequestId(value: unknown): value is number {
 function isWorkerRequest(value: unknown): value is WorkerRequest {
   if (!isRecord(value) || !isRequestId(value.requestId) || typeof value.command !== "string") return false;
   if (value.command === "cancel") return true;
-  if (value.command !== "chat" && value.command !== "digest") return false;
+  if (value.command !== "chat" && value.command !== "digest" && value.command !== "commentary") return false;
   if (!("root" in value) || typeof value.modelId !== "string" || typeof value.apiKey !== "string") return false;
   if (value.question !== undefined && typeof value.question !== "string") return false;
   return value.stream === undefined || typeof value.stream === "boolean";

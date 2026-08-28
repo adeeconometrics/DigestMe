@@ -34,13 +34,20 @@ from pydantic_ai.messages import (
 from pydantic_ai.run import AgentRunResultEvent
 from pydantic_core import ValidationError
 
-from .agent import build_chat_openrouter_agent, build_openrouter_agent
+from .agent import build_chat_openrouter_agent, build_commentary_openrouter_agent, build_openrouter_agent
 from .document import DocumentNode
-from .schemas import CaseDigest, CaseDigestResult, ChatAnswer
+from .schemas import (
+    CaseDigest,
+    CaseDigestResult,
+    ChatAnswer,
+    CommentaryDigest,
+    CommentaryDigestResult,
+)
 from .tools import DocumentContext
 
 
 DIGEST_PROMPT = "Create a complete case digest from the supplied source document."
+COMMENTARY_DIGEST_PROMPT = "Create a complete commentary digest for the supplied chapter."
 StreamEmitter = Callable[[str], object]
 RequestStreamEmitter = Callable[[int, str], object]
 _REQUEST_PAYLOADS: dict[int, str] = {}
@@ -307,6 +314,33 @@ async def run_case_digest(
     )
 
 
+async def run_commentary_digest(
+    root: DocumentNode | Mapping[str, object],
+    *,
+    api_key: str,
+    model_name: str,
+    agent: Agent[DocumentContext, CommentaryDigest] | None = None,
+    usage_limits: UsageLimits | None = None,
+) -> CommentaryDigestResult:
+    """Run the structured commentary-digest agent and retain its source references.
+
+    The agent fills the typed ``CommentaryDigest`` contract for one supplied
+    commentary chapter; ``usage_limits`` defaults to pydantic-ai's per-run
+    budget unless a headless run lifts it.
+    """
+    context = _context(root)
+    runner = agent or build_commentary_openrouter_agent(api_key=api_key, model_name=model_name)
+    result, elapsed_ms = await _run_agent(
+        lambda: runner.run(COMMENTARY_DIGEST_PROMPT, deps=context, usage_limits=usage_limits)
+    )
+    return CommentaryDigestResult(
+        digest=result.output,
+        references=context.to_references(),
+        model=model_name,
+        elapsed_ms=elapsed_ms,
+    )
+
+
 async def run_chat(
     root: DocumentNode | Mapping[str, object],
     question: str,
@@ -429,6 +463,10 @@ async def run_request(payload: str, request_id: int) -> str:
 
         if command == "digest":
             return (await run_case_digest(root, api_key=api_key, model_name=model_name)).model_dump_json()
+        if command == "commentary":
+            return (
+                await run_commentary_digest(root, api_key=api_key, model_name=model_name)
+            ).model_dump_json()
         if command == "chat":
             result = await run_chat(
                 root,

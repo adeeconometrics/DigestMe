@@ -26,6 +26,7 @@ from engine.agent import (
     build_deepseek_agent,
     build_openrouter_agent,
 )
+from engine.schemas import CommentaryDigest
 
 
 def test_digest_usage_limits_are_generous_for_headless_runs() -> None:
@@ -119,6 +120,20 @@ def test_commentary_agent_registers_the_full_toolset() -> None:
     assert agent.name == "commentary-digest-engine"
     assert isinstance(agent.model_settings, dict)
     assert agent.model_settings["max_tokens"] == AGENT_MAX_TOKENS
+
+
+def test_commentary_agent_uses_the_typed_commentary_schema() -> None:
+    agent = build_commentary_agent()
+
+    assert agent.output_type is CommentaryDigest
+
+
+def test_commentary_instructions_define_canonical_empty_values() -> None:
+    assert "return every field" in COMMENTARY_AGENT_INSTRUCTIONS
+    assert 'empty string ("")' in COMMENTARY_AGENT_INSTRUCTIONS
+    assert "empty list ([])" in COMMENTARY_AGENT_INSTRUCTIONS
+    assert "never use null" in COMMENTARY_AGENT_INSTRUCTIONS
+    assert "case objects each containing case_name" in COMMENTARY_AGENT_INSTRUCTIONS
 
 
 def test_build_commentary_deepseek_agent_uses_explicit_model_and_key() -> None:
