@@ -3,6 +3,10 @@ import type {
   CaseDigestFacts,
   CaseDigestIssue,
 } from "../src/lib/caseDigestDocx";
+import type {
+  CommentaryCase,
+  CommentaryDigest,
+} from "../src/lib/commentaryDigestDocx";
 import type { DocumentNode, ParseMetrics, ParsedDocument } from "../src/parser";
 import type { ChatThread, DigestSession, PersistedChatMessage } from "../src/chat/session";
 import type { Deck, Flashcard, StudySession } from "../src/types";
@@ -52,6 +56,40 @@ export function buildIssue(overrides: Partial<CaseDigestIssue> = {}): CaseDigest
     issue: "WON the case wins.",
     ruling: "YES",
     ratio: "Because of the doctrine.",
+    ...overrides,
+  };
+}
+
+// --- Commentary digest (src/lib/commentaryDigestDocx.ts) ---
+
+export function buildCommentaryCase(overrides: Partial<CommentaryCase> = {}): CommentaryCase {
+  return {
+    case_name: "Test Corp. v. Respondent",
+    citation: "G.R. No. 12345, January 1, 2020",
+    doctrine: "The doctrine attributed to the case.",
+    ...overrides,
+  };
+}
+
+export function buildCommentaryDigest(overrides: Partial<CommentaryDigest> = {}): CommentaryDigest {
+  return {
+    source_title: "Philippine Corporate Law, Villanueva, 2019 ed.",
+    chapter_title: "Board of Directors",
+    sections_covered: "Secs. 21-40, RA No. 11232",
+    subject: "Corporation Law",
+    summary: "Summary of the chapter.",
+    rule: "Corporate powers are exercised by the board as a body.",
+    elements: ["A board of at least five members."],
+    exceptions: ["Acts within the ordinary course of business."],
+    definitions: ["Controlling stockholder: one who holds sufficient shares."],
+    cases: [buildCommentaryCase()],
+    implementing_rules: ["SEC MC No. 28, s. 2020 on board composition."],
+    related_provisions: ["Sec. 23, RA 11232 and Sec. 30 on removal."],
+    legislative_history: "The RCC reworked the board powers.",
+    debates: ["Commentators split on veil piercing."],
+    practice_pointers: ["File the GIS within thirty days."],
+    illustrations: ["A director voting for an ultra vires act may be liable."],
+    study_notes: ["The board acts only as a body."],
     ...overrides,
   };
 }

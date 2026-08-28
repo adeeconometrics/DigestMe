@@ -1,0 +1,58 @@
+{
+  "source_title": "Philippine Corporate Law, Villanueva, 2019 ed.",
+  "chapter_title": "Board of Directors",
+  "sections_covered": "Secs. 21-40, RA No. 11232; former Secs. 21-39, BP 68",
+  "subject": "Corporation Law",
+  "summary": "The chapter examines the composition, election, and powers of the board of directors. It contrasts the old Code provisions with the Revised Corporation Code and traces how the board acts only as a body.",
+  "rule": "Corporate powers are exercised by the board of directors as a body, not by individual directors acting separately.",
+  "elements": [
+    "A board composed of at least five but not more than fifteen directors",
+    "Election by the stockholders in their annual or special meeting",
+    "Corporate action taken through a board resolution or meeting"
+  ],
+  "exceptions": [
+    "Acts within the ordinary course of business may be delegated to officers",
+    "Emergency board action when a quorum cannot be convened"
+  ],
+  "definitions": [
+    "Controlling stockholder: one who holds sufficient shares to elect the board.",
+    "Quorum: a majority of the directors, unless a higher number is required."
+  ],
+  "cases": [
+    {
+      "case_name": "Villanueva v. Bayside Port Workers Cooperative",
+      "citation": "G.R. No. 123456, January 15, 2001",
+      "doctrine": "Directors cannot bind the corporation outside board authority; individual acts are void unless ratified."
+    },
+    {
+      "case_name": "People v. Santos",
+      "citation": "G.R. No. 234567, March 10, 2005",
+      "doctrine": "The board's collective action is the act of the corporation, not of its members individually."
+    }
+  ],
+  "implementing_rules": [
+    "SEC MC No. 28, s. 2020 on board composition and qualifications",
+    "SEC Opinion No. 20-01 on vacancies filled by the remaining directors"
+  ],
+  "related_provisions": [
+    "Sec. 23, RA 11232 (composition and qualifications)",
+    "Sec. 30, RA 11232 (removal of directors)"
+  ],
+  "legislative_history": "The RCC reworked the board powers that B.P. Blg. 68 originally stated, adding independent directors and clarifying term limits.",
+  "debates": [
+    "Commentators split on whether the veil may be pierced for a single proprietorship.",
+    "Whether a written assent without a meeting is equivalent to a board resolution."
+  ],
+  "practice_pointers": [
+    "File the general information sheet within thirty days of the annual meeting.",
+    "Keep board minutes because third parties may rely on them."
+  ],
+  "illustrations": [
+    "A director who votes in favor of an ultra vires act may be solidarily liable.",
+    "A resolution signed by all directors without a meeting binds the corporation."
+  ],
+  "study_notes": [
+    "The board acts only as a body; individual directors have no independent powers.",
+    "Quorum is based on the fixed number of directors in the articles."
+  ]
+}
