@@ -19,6 +19,7 @@ describe("buildContextTree", () => {
 
     expect(digestOf(markdown)).toEqual(
       buildDocumentNode({
+        heading: "Document",
         children: [
           buildSection("n1", "Title", [
             buildBlock("n2", "Some body text.", { section: "Title" }),
@@ -123,13 +124,25 @@ describe("buildContextTree", () => {
     const root = digestOf("body only", "My Case");
 
     expect(root.label).toBe("My Case");
+    expect(root.heading).toBe("My Case");
     expect(root.section).toBe("My Case");
     expect(root.children[0].section).toBe("My Case");
   });
 
+  it("keeps the full heading for search while truncating the display label", () => {
+    const longTitle =
+      "SEC. 23. The Board of Directors; Composition; Election; Qualification; Term of Office; Removal; Filling of Vacancies";
+    const root = digestOf(`# ${longTitle}\nbody`);
+
+    const section = root.children[0];
+    expect(section.label.length).toBeLessThanOrEqual(72);
+    expect(section.label.endsWith("…")).toBe(true);
+    expect(section.heading).toBe(longTitle);
+  });
+
   it("returns a bare root for empty markdown", () => {
-    expect(digestOf("")).toEqual(buildDocumentNode());
-    expect(digestOf("   \n\n  ")).toEqual(buildDocumentNode());
+    expect(digestOf("")).toEqual(buildDocumentNode({ heading: "Document" }));
+    expect(digestOf("   \n\n  ")).toEqual(buildDocumentNode({ heading: "Document" }));
   });
 
   it("produces deterministic ids for the same input", () => {

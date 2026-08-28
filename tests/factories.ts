@@ -84,7 +84,7 @@ export function buildSection(
   children: DocumentNode[] = [],
   overrides: Partial<DocumentNode> = {},
 ): DocumentNode {
-  return buildDocumentNode({ id, kind: "section", label, section: label, children, ...overrides });
+  return buildDocumentNode({ id, kind: "section", label, heading: label, section: label, children, ...overrides });
 }
 
 // --- Persistence (src/lib/db.ts, src/types.ts) ---

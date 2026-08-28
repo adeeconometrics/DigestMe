@@ -1,5 +1,7 @@
 """Tests for global regex search, ranked term-overlap search, and source references."""
 
+from conftest import LONG_HEADING
+
 from engine.document import DocumentNode
 from engine.search import search_document, search_document_ranked
 
@@ -75,6 +77,24 @@ def test_search_rejects_negative_offset(document_tree: DocumentNode) -> None:
     assert result.hits == []
     assert result.total == 0
     assert result.error == "offset must be non-negative"
+
+
+def test_search_matches_words_inside_the_full_heading(long_heading_tree: DocumentNode) -> None:
+    result = search_document(long_heading_tree, r"term of office")
+
+    assert len(result.hits) == 1
+    assert result.hits[0].node_id == "n1"
+    assert result.hits[0].matched_field == "heading"
+    assert "Term of Office" in result.hits[0].snippet
+
+
+def test_search_snippet_prefers_the_full_heading_over_the_label(long_heading_tree: DocumentNode) -> None:
+    result = search_document(long_heading_tree, r"filling of vacancies")
+
+    assert len(result.hits) == 1
+    assert result.hits[0].node_id == "n1"
+    assert result.hits[0].matched_field == "heading"
+    assert result.hits[0].snippet == LONG_HEADING
 
 
 def test_ranked_search_ranks_exact_phrase_matches_first(document_tree: DocumentNode) -> None:

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .document import DocumentNode, flatten_tree
 
 
-SearchField = Literal["label", "section", "text"]
+SearchField = Literal["label", "section", "heading", "text"]
 
 
 class SearchHit(BaseModel):
@@ -101,6 +101,8 @@ def search_document(
             continue
 
         values: list[tuple[SearchField, str]] = [("label", node.label), ("section", node.section)]
+        if node.heading is not None:
+            values.append(("heading", node.heading))
         if node.text is not None:
             values.insert(0, ("text", node.text))
         for field, value in values:
@@ -110,7 +112,7 @@ def search_document(
 
             total += 1
             if len(hits) < limit and total > offset:
-                source = node.text or node.label
+                source = node.heading or node.text or node.label
                 source_match = matcher.search(source) or match
                 hits.append(
                     SearchHit(

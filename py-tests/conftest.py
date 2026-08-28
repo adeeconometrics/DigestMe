@@ -10,6 +10,12 @@ import pytest
 
 from engine.document import DocumentNode
 
+LONG_HEADING = (
+    "SEC. 23. The Board of Directors; Composition; Election; Qualification; "
+    "Term of Office; Removal; Filling of Vacancies"
+)
+TRUNCATED_LABEL = "SEC. 23. The Board of Directors; Composition; Election…"
+
 
 @pytest.fixture(name="document_tree_payload")
 def fixture_document_tree_payload() -> dict[str, object]:
@@ -25,6 +31,7 @@ def fixture_document_tree_payload() -> dict[str, object]:
                 "id": "n1",
                 "kind": "section",
                 "label": "I. Facts",
+                "heading": "I. Facts",
                 "section": "I. Facts",
                 "page": 1,
                 "children": [
@@ -32,6 +39,7 @@ def fixture_document_tree_payload() -> dict[str, object]:
                         "id": "n2",
                         "kind": "section",
                         "label": "A. Background",
+                        "heading": "A. Background",
                         "section": "I. Facts › A. Background",
                         "page": 1,
                         "children": [
@@ -61,6 +69,7 @@ def fixture_document_tree_payload() -> dict[str, object]:
                 "id": "n5",
                 "kind": "section",
                 "label": "II. Ruling",
+                "heading": "II. Ruling",
                 "section": "II. Ruling",
                 "page": 5,
                 "children": [
@@ -83,6 +92,42 @@ def fixture_document_tree_payload() -> dict[str, object]:
 def document_tree(document_tree_payload: dict[str, object]) -> DocumentNode:
     """Validate the serialized IndexedDB payload before using it in tests."""
     return DocumentNode.model_validate(document_tree_payload)
+
+
+@pytest.fixture(name="long_heading_tree")
+def fixture_long_heading_tree() -> DocumentNode:
+    """A commentary-style section whose full heading exceeds the display label."""
+    return DocumentNode.model_validate(
+        {
+            "id": "n0",
+            "kind": "document",
+            "label": "Corporation Law",
+            "heading": "Corporation Law",
+            "section": "Corporation Law",
+            "page": None,
+            "children": [
+                {
+                    "id": "n1",
+                    "kind": "section",
+                    "label": TRUNCATED_LABEL,
+                    "heading": LONG_HEADING,
+                    "section": f"Corporation Law › {TRUNCATED_LABEL}",
+                    "page": 1,
+                    "children": [
+                        {
+                            "id": "n2",
+                            "kind": "block",
+                            "label": "The board exercises corporate powers.",
+                            "section": f"Corporation Law › {TRUNCATED_LABEL}",
+                            "page": 1,
+                            "text": "The board exercises corporate powers.",
+                            "children": [],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
 
 
 @pytest.fixture

@@ -15,6 +15,11 @@ export interface DocumentNode {
   /** Short display label, e.g. heading text or a snippet of body content. */
   label: string;
   /**
+   * Full untruncated heading text for document/section nodes, kept for exact
+   * search and navigation even when the display label is shortened.
+   */
+  heading?: string;
+  /**
    * Nearest enclosing section reference, e.g. "II. Facts › A. Background".
    * Shown on hover as `(section, p#)`.
    */

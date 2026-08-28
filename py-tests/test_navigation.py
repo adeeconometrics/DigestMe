@@ -1,6 +1,8 @@
 """Tests for traceable document navigation."""
 
-from engine.document import DocumentNode, navigate_document_tree
+from conftest import LONG_HEADING, TRUNCATED_LABEL
+
+from engine.document import DocumentNode, find_section, navigate_document_tree
 
 
 def test_navigation_returns_top_level_outline(document_tree: DocumentNode) -> None:
@@ -85,3 +87,28 @@ def test_navigation_returns_no_entries_for_non_positive_limit(document_tree: Doc
 
     assert result.entries == []
     assert result.total == 0
+
+
+def test_find_section_matches_full_heading_beyond_truncated_label(long_heading_tree: DocumentNode) -> None:
+    found = find_section(long_heading_tree, LONG_HEADING)
+
+    assert found is not None
+    assert found.id == "n1"
+    assert found.label == TRUNCATED_LABEL
+    assert found.heading == LONG_HEADING
+
+
+def test_navigation_accepts_a_full_heading_path(long_heading_tree: DocumentNode) -> None:
+    result = navigate_document_tree(long_heading_tree, LONG_HEADING)
+
+    assert result.error is None
+    assert result.section == f"Corporation Law › {TRUNCATED_LABEL}"
+    assert [entry.node_id for entry in result.entries] == ["n2"]
+
+
+def test_navigation_entries_expose_the_full_heading(long_heading_tree: DocumentNode) -> None:
+    result = navigate_document_tree(long_heading_tree)
+
+    assert result.error is None
+    assert result.entries[0].heading == LONG_HEADING
+    assert result.entries[0].label == TRUNCATED_LABEL
