@@ -63,13 +63,22 @@ def _flatten_without_root(root: DocumentNode) -> list[DocumentNode]:
     return nodes
 
 
-def navigate_document(ctx: RunContext[DocumentContext], section_path: str | None = None) -> NavigationResult:
-    """Inspect the outline or retrieve a section's immediate contents and source references.
+def navigate_document(
+    ctx: RunContext[DocumentContext],
+    section_path: str | None = None,
+    depth: int = 1,
+    offset: int = 0,
+    limit: int = 10,
+) -> NavigationResult:
+    """Inspect the outline or retrieve a section's contents within a bounded window.
 
-    Call this without a path first to understand the document tree. Then pass an exact ``section``
-    path from an entry to inspect that section's children and their ``page`` values.
+    Call this without a path first to understand the document tree. Then pass an exact
+    ``section`` path from an entry to inspect that section's children and their ``page``
+    values. Use ``depth`` 2 or 3 to flatten nested levels into one call; ``offset`` and
+    ``limit`` page through the flattened entries, and ``total`` reports how many exist
+    so large sections can be read incrementally without exhausting the context.
     """
-    result = navigate_document_tree(ctx.deps.root, section_path)
+    result = navigate_document_tree(ctx.deps.root, section_path, depth=depth, offset=offset, limit=limit)
     ctx.deps.remember_section(result.section)
     for entry in result.entries:
         ctx.deps.remember(entry.node_id)
