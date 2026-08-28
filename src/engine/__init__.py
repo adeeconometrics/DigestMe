@@ -38,6 +38,7 @@ from .schemas import (
     CaseDigestIssue,
     CaseDigestResult,
     ChatAnswer,
+    CommentaryCase,
     CommentaryDigest,
     CommentaryDigestResult,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "ChatAnswer",
     "CitationHit",
     "CitationResult",
+    "CommentaryCase",
     "CommentaryDigest",
     "CommentaryDigestResult",
     "DocumentContext",

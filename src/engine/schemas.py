@@ -307,6 +307,50 @@ class CaseDigestResult(BaseModel):
     elapsed_ms: int = Field(ge=0)
 
 
+class CommentaryCase(BaseModel):
+    """One case cited by the commentary with the proposition attributed to it.
+
+    Every key is present in the serialized contract. An empty string means the
+    source does not state that element separately.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_fields(cls, value: Any) -> Any:
+        """Represent unsupported case details as empty strings."""
+        return _normalize_missing_fields(
+            value,
+            scalar_fields=("case_name", "citation", "doctrine"),
+        )
+
+    case_name: str = Field(
+        description=(
+            "The name of the case as stated in the source, normally "
+            "'Petitioner v. Respondent'. "
+            "Preserve the source's spelling. "
+            "Return an empty string if the source does not name the case."
+        )
+    )
+    citation: str = Field(
+        description=(
+            "The docket number or reporter citation of the case, "
+            "e.g. 'G.R. No. 123456, January 15, 2001'. "
+            "Copy the citation from the source. "
+            "Return an empty string if the source provides no citation."
+        )
+    )
+    doctrine: str = Field(
+        description=(
+            "The proposition the author attributes to the case, stated as a reusable rule. "
+            "Ground it in the chapter's discussion. "
+            "Return an empty string if the author cites the case without stating what it "
+            "stands for."
+        )
+    )
+
+
 class CommentaryDigest(BaseModel):
     """Complete structured output for one chapter of a legal commentary.
 
@@ -336,6 +380,9 @@ class CommentaryDigest(BaseModel):
                 "elements",
                 "exceptions",
                 "definitions",
+                "cases",
+                "implementing_rules",
+                "related_provisions",
             ),
         )
 
@@ -407,6 +454,31 @@ class CommentaryDigest(BaseModel):
             "with its meaning, e.g. 'controlling stockholder'. "
             "Keep each item self-contained. "
             "Return an empty list if the source defines no terms."
+        )
+    )
+    cases: list[CommentaryCase] = Field(
+        description=(
+            "The jurisprudence cited by the author in the covered chapter. "
+            "Include a separate object for each distinct case with its case name, citation, "
+            "and the proposition for which it is cited. "
+            "Return an empty list when the source cites no cases."
+        )
+    )
+    implementing_rules: list[str] = Field(
+        description=(
+            "SEC implementing rules, memorandum circulars, or opinions discussed in the "
+            "chapter. "
+            "Each item should identify the rule and the point the author makes about it. "
+            "Return an empty list if the source cites none."
+        )
+    )
+    related_provisions: list[str] = Field(
+        description=(
+            "Cross-references to other sections of the same statute or to other laws "
+            "discussed in the chapter. "
+            "Each item should identify the provision and its connection to the covered "
+            "material. "
+            "Return an empty list if the source states no cross-references."
         )
     )
 

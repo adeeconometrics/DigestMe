@@ -163,6 +163,15 @@ def commentary_payload() -> dict[str, object]:
         "elements": ["A board of at least five members", "Election by the stockholders"],
         "exceptions": ["Acts within the ordinary course of business"],
         "definitions": ["Controlling stockholder: one who holds sufficient shares to elect the board."],
+        "cases": [
+            {
+                "case_name": "Villanueva v. Bayside Port Workers Cooperative",
+                "citation": "G.R. No. 123456, January 15, 2001",
+                "doctrine": "Directors cannot bind the corporation outside board authority.",
+            }
+        ],
+        "implementing_rules": ["SEC MC No. 28, s. 2020 on board composition"],
+        "related_provisions": ["Sec. 23, RA 11232 and Sec. 30 on removal"],
     }
 
 
@@ -208,6 +217,39 @@ def test_commentary_core_doctrine_normalizes_missing_fields() -> None:
     assert digest.exceptions == []
 
 
+def test_commentary_authorities_validates() -> None:
+    digest = CommentaryDigest.model_validate(commentary_payload())
+
+    assert digest.cases[0].case_name == "Villanueva v. Bayside Port Workers Cooperative"
+    assert digest.cases[0].citation == "G.R. No. 123456, January 15, 2001"
+    assert digest.cases[0].doctrine.startswith("Directors cannot bind the corporation")
+    assert digest.implementing_rules == ["SEC MC No. 28, s. 2020 on board composition"]
+    assert digest.related_provisions == ["Sec. 23, RA 11232 and Sec. 30 on removal"]
+
+
+def test_commentary_case_empty_object_is_normalized() -> None:
+    digest = CommentaryDigest.model_validate({"cases": [{}]})
+
+    assert digest.cases[0].model_dump() == {
+        "case_name": "",
+        "citation": "",
+        "doctrine": "",
+    }
+
+
+def test_commentary_authorities_normalize_missing_fields() -> None:
+    payload = dict(commentary_payload())
+    payload.pop("cases")
+    payload["implementing_rules"] = None
+    payload["related_provisions"] = None
+
+    digest = CommentaryDigest.model_validate(payload)
+
+    assert digest.cases == []
+    assert digest.implementing_rules == []
+    assert digest.related_provisions == []
+
+
 def test_completely_empty_commentary_digest_is_normalized() -> None:
     digest = CommentaryDigest.model_validate({})
 
@@ -221,6 +263,9 @@ def test_completely_empty_commentary_digest_is_normalized() -> None:
         "elements": [],
         "exceptions": [],
         "definitions": [],
+        "cases": [],
+        "implementing_rules": [],
+        "related_provisions": [],
     }
 
 
@@ -237,11 +282,38 @@ def test_commentary_schema_requires_the_reference_frame() -> None:
         "elements",
         "exceptions",
         "definitions",
+        "cases",
+        "implementing_rules",
+        "related_provisions",
     }
     assert schema["properties"]["source_title"]["type"] == "string"
     assert "empty string" in schema["properties"]["source_title"]["description"]
     assert schema["properties"]["elements"]["items"]["type"] == "string"
     assert "empty list" in schema["properties"]["elements"]["description"]
+
+    case_schema = schema["$defs"]["CommentaryCase"]
+    assert set(case_schema["required"]) == {"case_name", "citation", "doctrine"}
+    assert case_schema["properties"]["case_name"]["type"] == "string"
+    assert "empty string" in case_schema["properties"]["case_name"]["description"]
+
+
+def test_commentary_case_misattributed_shapes_are_rejected() -> None:
+    payload = dict(commentary_payload())
+    payload["cases"] = ["not a case object"]
+
+    with pytest.raises(ValidationError):
+        CommentaryDigest.model_validate(payload)
+
+    payload = dict(commentary_payload())
+    cases_value = payload["cases"]
+    assert isinstance(cases_value, list)
+    case = dict(cases_value[0]) if isinstance(cases_value[0], dict) else None
+    assert case is not None
+    case["doctrine"] = ["not a string"]
+    payload["cases"] = [case]
+
+    with pytest.raises(ValidationError):
+        CommentaryDigest.model_validate(payload)
 
 
 def test_commentary_unknown_keys_are_ignored() -> None:
