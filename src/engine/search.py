@@ -34,6 +34,8 @@ class SearchResult(BaseModel):
     pattern: str
     hits: list[SearchHit] = Field(default_factory=list)
     error: str | None = None
+    offset: int = 0
+    total: int = 0
 
 
 class RankedSearchHit(SearchHit):
@@ -68,8 +70,17 @@ def _snippet(value: str, match: re.Match[str], limit: int = 180) -> str:
     return f"{prefix}{value[start:end]}{suffix}"
 
 
-def search_document(root: DocumentNode, pattern: str, limit: int = 10) -> SearchResult:
-    """Search node text, labels, and section paths with a case-insensitive regex."""
+def search_document(
+    root: DocumentNode,
+    pattern: str,
+    limit: int = 10,
+    offset: int = 0,
+) -> SearchResult:
+    """Search node text, labels, section paths, and headings with a case-insensitive regex.
+
+    ``offset`` pages through matches after the first ``limit`` results, and ``total``
+    reports every match so callers know when more pages exist.
+    """
     if not pattern:
         return SearchResult(pattern=pattern, error="Search pattern must not be empty.")
 
@@ -79,9 +90,12 @@ def search_document(root: DocumentNode, pattern: str, limit: int = 10) -> Search
         return SearchResult(pattern=pattern, error=f"Invalid search pattern: {error}")
 
     if limit <= 0:
-        return SearchResult(pattern=pattern)
+        return SearchResult(pattern=pattern, offset=offset)
+    if offset < 0:
+        return SearchResult(pattern=pattern, offset=offset, error="offset must be non-negative")
 
     hits: list[SearchHit] = []
+    total = 0
     for node in flatten_tree(root):
         if node.kind == "document":
             continue
@@ -94,24 +108,23 @@ def search_document(root: DocumentNode, pattern: str, limit: int = 10) -> Search
             if match is None:
                 continue
 
-            source = node.text or node.label
-            source_match = matcher.search(source) or match
-            hits.append(
-                SearchHit(
-                    node_id=node.id,
-                    label=node.label,
-                    section=node.section,
-                    page=node.page,
-                    snippet=_snippet(source, source_match),
-                    matched_field=field,
+            total += 1
+            if len(hits) < limit and total > offset:
+                source = node.text or node.label
+                source_match = matcher.search(source) or match
+                hits.append(
+                    SearchHit(
+                        node_id=node.id,
+                        label=node.label,
+                        section=node.section,
+                        page=node.page,
+                        snippet=_snippet(source, source_match),
+                        matched_field=field,
+                    )
                 )
-            )
             break
 
-        if len(hits) >= limit:
-            break
-
-    return SearchResult(pattern=pattern, hits=hits)
+    return SearchResult(pattern=pattern, offset=offset, total=total, hits=hits)
 
 
 def _tokenize(query: str) -> list[str]:

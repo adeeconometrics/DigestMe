@@ -44,6 +44,39 @@ def test_search_reports_invalid_or_empty_patterns(document_tree: DocumentNode) -
     assert empty.error == "Search pattern must not be empty."
 
 
+def test_search_pages_hits_with_offset_and_reports_total(document_tree: DocumentNode) -> None:
+    first = search_document(document_tree, "the|was|committee", limit=1)
+    second = search_document(document_tree, "the|was|committee", limit=1, offset=1)
+
+    assert [hit.node_id for hit in first.hits] == ["n3"]
+    assert first.total == 3
+    assert [hit.node_id for hit in second.hits] == ["n4"]
+    assert second.total == 3
+
+
+def test_search_reports_full_total_without_windowing(document_tree: DocumentNode) -> None:
+    result = search_document(document_tree, "the")
+
+    assert [hit.node_id for hit in result.hits] == ["n3", "n4", "n6"]
+    assert result.total == 3
+    assert result.offset == 0
+
+
+def test_search_offset_beyond_matches_returns_empty_with_total(document_tree: DocumentNode) -> None:
+    result = search_document(document_tree, "the", limit=10, offset=5)
+
+    assert result.hits == []
+    assert result.total == 3
+
+
+def test_search_rejects_negative_offset(document_tree: DocumentNode) -> None:
+    result = search_document(document_tree, "the", offset=-1)
+
+    assert result.hits == []
+    assert result.total == 0
+    assert result.error == "offset must be non-negative"
+
+
 def test_ranked_search_ranks_exact_phrase_matches_first(document_tree: DocumentNode) -> None:
     result = search_document_ranked(document_tree, "written notice")
 

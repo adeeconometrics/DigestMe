@@ -85,13 +85,20 @@ def navigate_document(
     return result
 
 
-def global_search(ctx: RunContext[DocumentContext], pattern: str, limit: int = 10) -> SearchResult:
+def global_search(
+    ctx: RunContext[DocumentContext],
+    pattern: str,
+    limit: int = 10,
+    offset: int = 0,
+) -> SearchResult:
     """Search the document with a case-insensitive regex when section labels are insufficient.
 
-    Each hit includes a node id, ``section``, and ``page`` reference. Use ``navigate_document``
-    with the returned section path to retrieve the surrounding context before reasoning.
+    Each hit includes a node id, ``section``, and ``page`` reference. ``total`` reports
+    every match and ``offset`` pages past the first ``limit``, so recurring terms can be
+    swept exhaustively. Use ``navigate_document`` with a returned section path to retrieve
+    the surrounding context before reasoning.
     """
-    result = search_document(ctx.deps.root, pattern, limit)
+    result = search_document(ctx.deps.root, pattern, limit, offset)
     for hit in result.hits:
         ctx.deps.remember(hit.node_id)
     return result
