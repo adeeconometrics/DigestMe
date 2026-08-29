@@ -17,7 +17,16 @@ from .config import (
     CredentialError,
     normalize_model_slug,
 )
-from .pipeline import CaseOutcome, PipelineError, process_case, process_chapter
+from .pipeline import (
+    PIPELINES,
+    CaseOutcome,
+    PipelineDefinition,
+    PipelineError,
+    process_case,
+    process_chapter,
+    process_pdf,
+    resolve_pipeline,
+)
 from .service_queue import ServiceQueue
 
 __all__ = [
@@ -28,9 +37,13 @@ __all__ = [
     "Credentials",
     "DEFAULT_MODEL_SLUG",
     "MODEL_SLUG_ENV",
+    "PIPELINES",
+    "PipelineDefinition",
     "PipelineError",
     "ServiceQueue",
     "normalize_model_slug",
     "process_case",
     "process_chapter",
+    "process_pdf",
+    "resolve_pipeline",
 ]

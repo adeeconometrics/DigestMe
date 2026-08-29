@@ -274,6 +274,78 @@ def _process_pdf(  # pylint: disable=too-many-arguments,too-many-locals  # famil
     return CaseOutcome(pdf=pdf_path, status="ok", docx=docx_path, elapsed_ms=elapsed_ms)
 
 
+@dataclass(frozen=True)
+class PipelineDefinition:
+    """One routable agent pipeline: agent wiring plus its renderer pairing.
+
+    ``key`` is the CLI agent-route identifier, ``unit_label`` and
+    ``summary_unit`` drive the progress wording, ``agent_stage``/``docx_stage``
+    select the digest family, and ``default_runner`` names the in-process
+    agent runner used when no runner is injected.
+    """
+
+    key: Literal["case-digest", "commentary-digest"]
+    unit_label: str
+    summary_unit: str
+    agent_stage: Callable[..., Path]
+    docx_stage: Callable[..., Path]
+    default_runner: DigestRunner | CommentaryRunner
+
+
+PIPELINES: dict[str, PipelineDefinition] = {
+    "case-digest": PipelineDefinition(
+        key="case-digest",
+        unit_label="case(s)",
+        summary_unit="cases",
+        agent_stage=stage_agent,
+        docx_stage=stage_docx,
+        default_runner=run_deepseek_digest,
+    ),
+    "commentary-digest": PipelineDefinition(
+        key="commentary-digest",
+        unit_label="chapter(s)",
+        summary_unit="chapters",
+        agent_stage=stage_commentary_agent,
+        docx_stage=stage_commentary_docx,
+        default_runner=run_commentary_deepseek_digest,
+    ),
+}
+"""Agent-route registry: the single dispatch table for headless pipelines."""
+
+
+def resolve_pipeline(key: str) -> PipelineDefinition:
+    """Return the pipeline definition registered for an agent route key."""
+    try:
+        return PIPELINES[key]
+    except KeyError as error:
+        raise KeyError(f"Unknown agent route {key!r}; choose from {', '.join(sorted(PIPELINES))}") from error
+
+
+def process_pdf(
+    pdf_path: Path,
+    out_dir: Path,
+    credentials: Credentials,
+    pipeline: PipelineDefinition,
+    *,
+    keep_intermediates: bool = False,
+    agent_runner: DigestRunner | CommentaryRunner | None = None,
+) -> CaseOutcome:
+    """Run the full pipeline for one PDF through a registered agent route.
+
+    The route's ``agent_stage`` and ``docx_stage`` select the digest family,
+    and its ``default_runner`` is used unless an explicit runner is injected.
+    """
+    return _process_pdf(
+        pdf_path,
+        out_dir,
+        credentials,
+        agent_stage=pipeline.agent_stage,
+        docx_stage=pipeline.docx_stage,
+        keep_intermediates=keep_intermediates,
+        agent_runner=agent_runner or pipeline.default_runner,
+    )
+
+
 def process_case(
     pdf_path: Path,
     out_dir: Path,
@@ -283,12 +355,11 @@ def process_case(
     agent_runner: DigestRunner | None = None,
 ) -> CaseOutcome:
     """Run the full case-digest pipeline for one case PDF, isolating failures per case."""
-    return _process_pdf(
+    return process_pdf(
         pdf_path,
         out_dir,
         credentials,
-        agent_stage=stage_agent,
-        docx_stage=stage_docx,
+        PIPELINES["case-digest"],
         keep_intermediates=keep_intermediates,
         agent_runner=agent_runner,
     )
@@ -308,12 +379,11 @@ def process_chapter(
     toolset, then the tsx stage renders the typed ``CommentaryDigest`` contract
     to ``<out_dir>/<stem>.docx`` for review.
     """
-    return _process_pdf(
+    return process_pdf(
         pdf_path,
         out_dir,
         credentials,
-        agent_stage=stage_commentary_agent,
-        docx_stage=stage_commentary_docx,
+        PIPELINES["commentary-digest"],
         keep_intermediates=keep_intermediates,
         agent_runner=agent_runner,
     )

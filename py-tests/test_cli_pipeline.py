@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from cli.config import Credentials
 from cli.pipeline import (
+    PIPELINES,
     REPO_ROOT,
+    CaseOutcome,
+    PipelineDefinition,
     PipelineError,
     process_case,
     process_chapter,
+    process_pdf,
+    resolve_pipeline,
     run_commentary_deepseek_digest,
     run_deepseek_digest,
     run_node_script,
@@ -27,6 +33,24 @@ from cli.pipeline import (
 from engine.agent import DIGEST_USAGE_LIMITS
 
 CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
+
+
+def _registered_route(
+    key: str,
+    *,
+    agent_stage: Callable[..., Path],
+    docx_stage: Callable[..., Path],
+) -> PipelineDefinition:
+    """Rebuild a registry route with fake stages while keeping its labels."""
+    base = PIPELINES[key]
+    return PipelineDefinition(
+        key=key,
+        unit_label=base.unit_label,
+        summary_unit=base.summary_unit,
+        agent_stage=agent_stage,
+        docx_stage=docx_stage,
+        default_runner=base.default_runner,
+    )
 
 
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -245,8 +269,11 @@ def test_process_chapter_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         return docx_path
 
     monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_pdf_inspector)
-    monkeypatch.setattr("cli.pipeline.stage_commentary_agent", fake_agent)
-    monkeypatch.setattr("cli.pipeline.stage_commentary_docx", fake_docx)
+    monkeypatch.setitem(
+        PIPELINES,
+        "commentary-digest",
+        _registered_route("commentary-digest", agent_stage=fake_agent, docx_stage=fake_docx),
+    )
 
     pdf_path = tmp_path / "Board of Directors.pdf"
     pdf_path.write_bytes(b"%PDF")
@@ -267,7 +294,11 @@ def test_process_chapter_isolates_stage_failure(monkeypatch: pytest.MonkeyPatch,
         return work_dir / "s.md", work_dir / "t.json"
 
     monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_inspector)
-    monkeypatch.setattr("cli.pipeline.stage_commentary_agent", failing_stage)
+    monkeypatch.setitem(
+        PIPELINES,
+        "commentary-digest",
+        _registered_route("commentary-digest", agent_stage=failing_stage, docx_stage=stage_commentary_docx),
+    )
 
     pdf_path = tmp_path / "chapter.pdf"
     pdf_path.write_bytes(b"%PDF")
@@ -320,8 +351,11 @@ def test_process_case_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         return docx_path
 
     monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_pdf_inspector)
-    monkeypatch.setattr("cli.pipeline.stage_agent", fake_agent)
-    monkeypatch.setattr("cli.pipeline.stage_docx", fake_docx)
+    monkeypatch.setitem(
+        PIPELINES,
+        "case-digest",
+        _registered_route("case-digest", agent_stage=fake_agent, docx_stage=fake_docx),
+    )
 
     pdf_path = tmp_path / "A v. B.pdf"
     pdf_path.write_bytes(b"%PDF")
@@ -354,8 +388,11 @@ def test_process_case_keeps_intermediates_when_requested(monkeypatch: pytest.Mon
         return docx_path
 
     monkeypatch.setattr("cli.pipeline.stage_pdf_inspector", fake_pdf_inspector)
-    monkeypatch.setattr("cli.pipeline.stage_agent", fake_agent)
-    monkeypatch.setattr("cli.pipeline.stage_docx", fake_docx)
+    monkeypatch.setitem(
+        PIPELINES,
+        "case-digest",
+        _registered_route("case-digest", agent_stage=fake_agent, docx_stage=fake_docx),
+    )
 
     pdf_path = tmp_path / "case.pdf"
     pdf_path.write_bytes(b"%PDF")
@@ -381,3 +418,72 @@ def test_process_case_isolates_stage_failure(monkeypatch: pytest.MonkeyPatch, tm
     assert "boom" in (outcome.error or "")
     assert outcome.docx is None
     assert (tmp_path / "out" / "work" / "case").is_dir()
+
+
+def test_pipeline_registry_maps_agent_routes_to_stages() -> None:
+    assert set(PIPELINES) == {"case-digest", "commentary-digest"}
+
+    case_route = PIPELINES["case-digest"]
+    assert case_route.unit_label == "case(s)"
+    assert case_route.summary_unit == "cases"
+    assert case_route.agent_stage is stage_agent
+    assert case_route.docx_stage is stage_docx
+    assert case_route.default_runner is run_deepseek_digest
+
+    commentary_route = PIPELINES["commentary-digest"]
+    assert commentary_route.unit_label == "chapter(s)"
+    assert commentary_route.summary_unit == "chapters"
+    assert commentary_route.agent_stage is stage_commentary_agent
+    assert commentary_route.docx_stage is stage_commentary_docx
+    assert commentary_route.default_runner is run_commentary_deepseek_digest
+
+
+def test_resolve_pipeline_rejects_unknown_routes() -> None:
+    with pytest.raises(KeyError, match="Unknown agent route 'unknown-digest'"):
+        resolve_pipeline("unknown-digest")
+
+
+def test_process_case_and_chapter_delegate_to_registered_routes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_process_pdf(
+        pdf: Path,
+        out_dir: Path,
+        credentials: Credentials,
+        pipeline: object,
+        *,
+        keep_intermediates: bool = False,
+        agent_runner: object | None = None,
+    ) -> CaseOutcome:
+        captured["pipeline"] = pipeline
+        return CaseOutcome(pdf=pdf, status="ok")
+
+    monkeypatch.setattr("cli.pipeline.process_pdf", fake_process_pdf)
+    pdf_path = tmp_path / "a.pdf"
+
+    process_case(pdf_path, tmp_path / "out", CREDENTIALS)
+    assert captured["pipeline"].key == "case-digest"
+
+    process_chapter(pdf_path, tmp_path / "out", CREDENTIALS)
+    assert captured["pipeline"].key == "commentary-digest"
+
+
+def test_process_pdf_defaults_to_the_route_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_process_pdf(  # pylint: disable=unused-argument
+        pdf: Path,
+        out_dir: Path,
+        credentials: Credentials,
+        **kwargs: object,
+    ) -> CaseOutcome:
+        captured["runner"] = kwargs.get("agent_runner")
+        return CaseOutcome(pdf=pdf, status="ok")
+
+    monkeypatch.setattr("cli.pipeline._process_pdf", fake_process_pdf)
+    pdf_path = tmp_path / "a.pdf"
+
+    process_pdf(pdf_path, tmp_path / "out", CREDENTIALS, PIPELINES["case-digest"])
+    assert captured["runner"] is run_deepseek_digest
