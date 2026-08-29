@@ -16,7 +16,10 @@ Create a production bundle with `npm run build` and preview it with `npm run pre
 Batch-digest every PDF in a directory into `.docx` without the browser. The
 `digest-headless` CLI runs the same three-stage pipeline as the web workspace:
 pdf-inspector converts each PDF to a context tree, a pydantic agent generates
-the digest, and a tsx script packs the digest into a Word document.
+the digest, and a tsx script packs the digest into a Word document. Each PDF
+is routed through the agent pipeline named by `--agent` — the case-digest
+agent for one case per PDF, or the commentary-digest agent for one commentary
+chapter per PDF.
 
 ### Install
 
@@ -35,6 +38,7 @@ digest-headless <indir> <outdir> [options]
 | --- | --- |
 | `indir` | Directory containing one PDF per case |
 | `outdir` | Directory for the generated `.docx` files |
+| `--agent ROUTE` | Agent pipeline for each PDF: `case-digest` (default) or `commentary-digest` |
 | `--workers N` | Parallel service workers consuming the case queue (default: 8) |
 | `--api-key KEY` | DeepSeek API key, overrides stored config |
 | `--model SLUG` | DeepSeek model id (default: `deepseek-v4-flash`) |
@@ -55,7 +59,7 @@ accepted, but slugs for other providers are rejected.
 
 ### Output
 
-Each case produces `<outdir>/<case>.docx` plus a machine-readable
+Each case or chapter produces `<outdir>/<case>.docx` plus a machine-readable
 `<outdir>/summary.json` with one entry per case (case name, status, docx path,
 elapsed time, error). Failed cases keep their intermediate artifacts under
 `<outdir>/work/<case>/` for inspection. Live progress prints `[n/total]`
@@ -79,6 +83,23 @@ digesting 2 case(s) into ~/digests with 4 workers
   [2/2] ok      38.9s  /Users/me/digests/Doe v. Roe.docx
 
 2/2 cases digested
+```
+
+Route the same batch through the commentary-digest agent (one chapter per
+PDF) with `--agent commentary-digest`:
+
+```bash
+digest-headless ~/chapters ~/chapter-digests --agent commentary-digest
+```
+
+```text
+model: deepseek-v4-flash  api-key: ...abcd
+digesting 2 chapter(s) into ~/chapter-digests with 8 workers
+
+  [1/2] ok      61.4s  /Users/me/chapter-digests/Board of Directors.docx
+  [2/2] ok      57.8s  /Users/me/chapter-digests/Corporate Powers.docx
+
+2/2 chapters digested
 ```
 
 ## CSV format

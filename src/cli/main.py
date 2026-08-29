@@ -2,8 +2,10 @@
 
 Batch-digests every PDF in ``indir`` into ``outdir`` using the pipeline
 ``cli(indir, outdir) | pdf-inspector | pydantic-agent | tsx-docx(outdir)``.
-Cases are consumed from a service queue by ``--workers`` parallel workers
-(default 8); each worker runs one full case pipeline.
+Each PDF is routed through the agent pipeline named by ``--agent``
+(``case-digest`` or ``commentary-digest``); cases are consumed from a service
+queue by ``--workers`` parallel workers (default 8), each running one full
+pipeline.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from functools import partial
 from pathlib import Path
 
 from .config import DEFAULT_MODEL_SLUG, CredentialError, CredentialStore, mask_key
-from .pipeline import CaseOutcome, process_case, process_chapter
+from .pipeline import PIPELINES, CaseOutcome, process_pdf, resolve_pipeline
 from .service_queue import ServiceQueue
 
 
@@ -25,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the headless-mode argument parser."""
     parser = argparse.ArgumentParser(
         prog="digest-headless",
-        description="Batch case-digest pipeline: pdf-inspector | pydantic-agent | tsx-docx.",
+        description="Batch digest pipeline: pdf-inspector | pydantic-agent | tsx-docx.",
     )
     parser.add_argument("indir", type=Path, help="directory containing one PDF per case")
     parser.add_argument("outdir", type=Path, help="directory for generated .docx files")
@@ -42,10 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"model slug (default: {DEFAULT_MODEL_SLUG})",
     )
     parser.add_argument(
-        "--mode",
-        choices=("case", "commentary"),
-        default="case",
-        help="digest family: case (default) or commentary",
+        "--agent",
+        choices=tuple(PIPELINES.keys()),
+        default="case-digest",
+        help="agent pipeline routed for each PDF: case-digest (default) or commentary-digest",
     )
     parser.add_argument(
         "--keep-intermediates",
@@ -137,13 +139,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"model: {credentials.model_slug}  api-key: ...{mask_key(credentials.api_key)}")
 
     cases = discover_cases(args.indir)
-    unit = "case(s)" if args.mode == "case" else "chapter(s)"
-    print(f"digesting {len(cases)} {unit} into {args.outdir} with {args.workers} workers\n")
+    pipeline = resolve_pipeline(args.agent)
+    print(f"digesting {len(cases)} {pipeline.unit_label} into {args.outdir} with {args.workers} workers\n")
 
     worker = partial(
-        process_case if args.mode == "case" else process_chapter,
+        process_pdf,
         out_dir=args.outdir,
         credentials=credentials,
+        pipeline=pipeline,
         keep_intermediates=args.keep_intermediates,
     )
     report = _live_progress(len(cases))
@@ -157,7 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     outcomes = dict(results)
     ordered = [outcomes[case] for case in cases]
-    _print_summary(ordered, unit="cases" if args.mode == "case" else "chapters")
+    _print_summary(ordered, unit=pipeline.summary_unit)
 
     summary_path = args.outdir / "summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)

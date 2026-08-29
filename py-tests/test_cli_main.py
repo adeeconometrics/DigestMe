@@ -9,7 +9,7 @@ import pytest
 
 from cli.config import CredentialError, Credentials
 from cli.main import main
-from cli.pipeline import CaseOutcome
+from cli.pipeline import CaseOutcome, PipelineDefinition
 
 CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
 
@@ -22,10 +22,11 @@ def _indir(tmp_path: Path) -> Path:
     return indir
 
 
-def _fake_process_case(  # pylint: disable=unused-argument
+def _fake_process_pdf(  # pylint: disable=unused-argument,too-many-arguments
     pdf: Path,
     out_dir: Path,
     credentials: Credentials,
+    pipeline: PipelineDefinition,
     *,
     keep_intermediates: bool = False,
     agent_runner: object | None = None,
@@ -53,13 +54,28 @@ class FailingStore:
 def test_main_writes_summary_and_returns_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    routed: dict[str, PipelineDefinition] = {}
+
+    def fake_process_pdf(  # pylint: disable=unused-argument,too-many-arguments
+        pdf: Path,
+        out_dir: Path,
+        credentials: Credentials,
+        pipeline: PipelineDefinition,
+        *,
+        keep_intermediates: bool = False,
+        agent_runner: object | None = None,
+    ) -> CaseOutcome:
+        routed["pipeline"] = pipeline
+        return _fake_process_pdf(pdf, out_dir, credentials, pipeline, keep_intermediates=keep_intermediates)
+
     monkeypatch.setattr("cli.main.CredentialStore", FakeStore)
-    monkeypatch.setattr("cli.main.process_case", _fake_process_case)
+    monkeypatch.setattr("cli.main.process_pdf", fake_process_pdf)
 
     outdir = tmp_path / "out"
     code = main([str(_indir(tmp_path)), str(outdir), "--workers", "2"])
 
     assert code == 0
+    assert routed["pipeline"].key == "case-digest"
     assert outdir.joinpath("a.docx").is_file()
     assert outdir.joinpath("b.docx").is_file()
     summary = json.loads(outdir.joinpath("summary.json").read_text(encoding="utf-8"))
@@ -85,10 +101,11 @@ def test_main_reports_missing_credentials(
 def test_main_returns_one_when_cases_fail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def failing_case(  # pylint: disable=unused-argument
+    def failing_process_pdf(  # pylint: disable=unused-argument
         pdf: Path,
         out_dir: Path,
         credentials: Credentials,
+        pipeline: PipelineDefinition,
         *,
         keep_intermediates: bool = False,
         agent_runner: object | None = None,
@@ -96,42 +113,48 @@ def test_main_returns_one_when_cases_fail(
         return CaseOutcome(pdf=pdf, status="failed", error="boom")
 
     monkeypatch.setattr("cli.main.CredentialStore", FakeStore)
-    monkeypatch.setattr("cli.main.process_case", failing_case)
+    monkeypatch.setattr("cli.main.process_pdf", failing_process_pdf)
 
     code = main([str(_indir(tmp_path)), str(tmp_path / "out"), "--workers", "2"])
     assert code == 1
 
 
-def test_main_commentary_mode_routes_to_process_chapter(
+def test_main_commentary_agent_routes_commentary_pipeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    routed: dict[str, object] = {}
+    routed: dict[str, PipelineDefinition] = {}
 
-    def fake_process_chapter(  # pylint: disable=unused-argument
+    def fake_process_pdf(  # pylint: disable=unused-argument,too-many-arguments
         pdf: Path,
         out_dir: Path,
         credentials: Credentials,
+        pipeline: PipelineDefinition,
         *,
         keep_intermediates: bool = False,
         agent_runner: object | None = None,
     ) -> CaseOutcome:
-        routed["called"] = True
-        out_dir.mkdir(parents=True, exist_ok=True)
-        docx = out_dir / f"{pdf.stem}.docx"
-        docx.write_bytes(b"PK")
-        return CaseOutcome(pdf=pdf, status="ok", docx=docx, elapsed_ms=5)
+        routed["pipeline"] = pipeline
+        return _fake_process_pdf(pdf, out_dir, credentials, pipeline, keep_intermediates=keep_intermediates)
 
     monkeypatch.setattr("cli.main.CredentialStore", FakeStore)
-    monkeypatch.setattr("cli.main.process_chapter", fake_process_chapter)
+    monkeypatch.setattr("cli.main.process_pdf", fake_process_pdf)
 
     outdir = tmp_path / "out"
-    code = main([str(_indir(tmp_path)), str(outdir), "--mode", "commentary"])
+    code = main([str(_indir(tmp_path)), str(outdir), "--agent", "commentary-digest"])
 
     assert code == 0
-    assert routed["called"] is True
+    assert routed["pipeline"].key == "commentary-digest"
     output = capsys.readouterr().out
     assert "chapter(s)" in output
     assert "2/2 chapters digested" in output
+
+
+def test_main_rejects_unknown_agent_routes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cli.main.CredentialStore", FakeStore)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([str(_indir(tmp_path)), str(tmp_path / "out"), "--agent", "unknown-digest"])
+    assert exc_info.value.code == 2
 
 
 def test_main_rejects_missing_input_directory(
