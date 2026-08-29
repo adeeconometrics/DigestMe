@@ -321,7 +321,7 @@ def resolve_pipeline(key: str) -> PipelineDefinition:
         raise KeyError(f"Unknown agent route {key!r}; choose from {', '.join(sorted(PIPELINES))}") from error
 
 
-def process_pdf(
+def process_pdf(  # pylint: disable=too-many-arguments  # route + injectable runner
     pdf_path: Path,
     out_dir: Path,
     credentials: Credentials,

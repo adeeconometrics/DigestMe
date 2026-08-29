@@ -7,6 +7,7 @@ import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -36,7 +37,7 @@ CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
 
 
 def _registered_route(
-    key: str,
+    key: Literal["case-digest", "commentary-digest"],
     *,
     agent_stage: Callable[..., Path],
     docx_stage: Callable[..., Path],
@@ -446,13 +447,13 @@ def test_resolve_pipeline_rejects_unknown_routes() -> None:
 def test_process_case_and_chapter_delegate_to_registered_routes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, PipelineDefinition] = {}
 
     def fake_process_pdf(
         pdf: Path,
         out_dir: Path,
         credentials: Credentials,
-        pipeline: object,
+        pipeline: PipelineDefinition,
         *,
         keep_intermediates: bool = False,
         agent_runner: object | None = None,
@@ -464,10 +465,13 @@ def test_process_case_and_chapter_delegate_to_registered_routes(
     pdf_path = tmp_path / "a.pdf"
 
     process_case(pdf_path, tmp_path / "out", CREDENTIALS)
-    assert captured["pipeline"].key == "case-digest"
+    case_key = captured["pipeline"].key
 
     process_chapter(pdf_path, tmp_path / "out", CREDENTIALS)
-    assert captured["pipeline"].key == "commentary-digest"
+    chapter_key = captured["pipeline"].key
+
+    assert case_key == "case-digest"
+    assert chapter_key == "commentary-digest"
 
 
 def test_process_pdf_defaults_to_the_route_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
