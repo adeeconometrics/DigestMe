@@ -37,11 +37,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="parallel service workers consuming the case queue (default: 8)",
     )
-    parser.add_argument("--api-key", help="DeepSeek API key (overrides stored config)")
+    parser.add_argument("--api-key", help="model provider API key (overrides stored config)")
     parser.add_argument(
         "--model",
         default=None,
         help=f"model slug (default: {DEFAULT_MODEL_SLUG})",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=("deepseek", "openrouter"),
+        default=None,
+        help="model provider: deepseek (default) or openrouter",
     )
     parser.add_argument(
         "--agent",
@@ -132,11 +138,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        credentials = CredentialStore().resolve(api_key=args.api_key, model_slug=args.model)
+        credentials = CredentialStore().resolve(
+            api_key=args.api_key,
+            model_slug=args.model,
+            provider=args.provider,
+        )
     except CredentialError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
-    print(f"model: {credentials.model_slug}  api-key: ...{mask_key(credentials.api_key)}")
+    print(
+        f"provider: {credentials.provider}  model: {credentials.model_slug}  "
+        f"api-key: ...{mask_key(credentials.api_key)}"
+    )
 
     cases = discover_cases(args.indir)
     pipeline = resolve_pipeline(args.agent)

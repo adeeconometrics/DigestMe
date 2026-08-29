@@ -21,11 +21,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from engine.agent import DIGEST_USAGE_LIMITS, build_commentary_deepseek_agent, build_deepseek_agent
+from engine.agent import (
+    DIGEST_USAGE_LIMITS,
+    build_commentary_deepseek_agent,
+    build_commentary_openrouter_agent,
+    build_deepseek_agent,
+    build_openrouter_agent,
+)
 from engine.bridge import run_case_digest, run_commentary_digest
 from engine.schemas import CaseDigestResult, CommentaryDigestResult
 
-from .config import Credentials
+from .config import Credentials, Provider
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_SCRIPT_DIR = Path(__file__).resolve().parent / "ts"
@@ -44,6 +50,9 @@ DigestRunner = Callable[..., Coroutine[Any, Any, CaseDigestResult]]
 
 CommentaryRunner = Callable[..., Coroutine[Any, Any, CommentaryDigestResult]]
 """Invocable commentary-digest runner; defaults to the DeepSeek-platform engine bridge."""
+
+Runner = DigestRunner | CommentaryRunner
+"""Any in-process agent runner, regardless of digest family."""
 
 
 class PipelineError(RuntimeError):
@@ -165,6 +174,60 @@ async def run_commentary_deepseek_digest(
         ) from error
 
 
+async def run_openrouter_digest(
+    root: Mapping[str, object],
+    *,
+    api_key: str,
+    model_name: str,
+) -> CaseDigestResult:
+    """Run one digest against OpenRouter's API with per-run credentials.
+
+    The model slug must be a full OpenRouter ``provider/model`` id, and the
+    key is passed straight to the provider instead of the process environment.
+    """
+    agent = build_openrouter_agent(api_key=api_key, model_name=model_name)
+    try:
+        return await asyncio.wait_for(
+            run_case_digest(
+                root,
+                api_key=api_key,
+                model_name=model_name,
+                agent=agent,
+                usage_limits=DIGEST_USAGE_LIMITS,
+            ),
+            timeout=DIGEST_STAGE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as error:
+        raise PipelineError(
+            f"agent stage exceeded the {DIGEST_STAGE_TIMEOUT_SECONDS:g}s per-case limit"
+        ) from error
+
+
+async def run_commentary_openrouter_digest(
+    root: Mapping[str, object],
+    *,
+    api_key: str,
+    model_name: str,
+) -> CommentaryDigestResult:
+    """Run one commentary digest against OpenRouter's API with per-run credentials."""
+    agent = build_commentary_openrouter_agent(api_key=api_key, model_name=model_name)
+    try:
+        return await asyncio.wait_for(
+            run_commentary_digest(
+                root,
+                api_key=api_key,
+                model_name=model_name,
+                agent=agent,
+                usage_limits=DIGEST_USAGE_LIMITS,
+            ),
+            timeout=DIGEST_STAGE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as error:
+        raise PipelineError(
+            f"agent stage exceeded the {DIGEST_STAGE_TIMEOUT_SECONDS:g}s per-case limit"
+        ) from error
+
+
 def stage_agent(
     tree_path: Path,
     credentials: Credentials,
@@ -242,7 +305,7 @@ def _process_pdf(  # pylint: disable=too-many-arguments,too-many-locals  # famil
     agent_stage: Callable[..., Path],
     docx_stage: Callable[..., Path],
     keep_intermediates: bool = False,
-    agent_runner: DigestRunner | CommentaryRunner | None = None,
+    agent_runner: Runner | None = None,
 ) -> CaseOutcome:
     """Run the shared pdf-inspector -> agent -> docx pipeline for one PDF.
 
@@ -280,8 +343,8 @@ class PipelineDefinition:
 
     ``key`` is the CLI agent-route identifier, ``unit_label`` and
     ``summary_unit`` drive the progress wording, ``agent_stage``/``docx_stage``
-    select the digest family, and ``default_runner`` names the in-process
-    agent runner used when no runner is injected.
+    select the digest family, and ``runners`` maps each model provider to the
+    in-process agent runner used when no runner is injected.
     """
 
     key: Literal["case-digest", "commentary-digest"]
@@ -289,7 +352,7 @@ class PipelineDefinition:
     summary_unit: str
     agent_stage: Callable[..., Path]
     docx_stage: Callable[..., Path]
-    default_runner: DigestRunner | CommentaryRunner
+    runners: dict[Provider, Runner]
 
 
 PIPELINES: dict[str, PipelineDefinition] = {
@@ -299,7 +362,10 @@ PIPELINES: dict[str, PipelineDefinition] = {
         summary_unit="cases",
         agent_stage=stage_agent,
         docx_stage=stage_docx,
-        default_runner=run_deepseek_digest,
+        runners={
+            "deepseek": run_deepseek_digest,
+            "openrouter": run_openrouter_digest,
+        },
     ),
     "commentary-digest": PipelineDefinition(
         key="commentary-digest",
@@ -307,7 +373,10 @@ PIPELINES: dict[str, PipelineDefinition] = {
         summary_unit="chapters",
         agent_stage=stage_commentary_agent,
         docx_stage=stage_commentary_docx,
-        default_runner=run_commentary_deepseek_digest,
+        runners={
+            "deepseek": run_commentary_deepseek_digest,
+            "openrouter": run_commentary_openrouter_digest,
+        },
     ),
 }
 """Agent-route registry: the single dispatch table for headless pipelines."""
@@ -328,12 +397,13 @@ def process_pdf(  # pylint: disable=too-many-arguments  # route + injectable run
     pipeline: PipelineDefinition,
     *,
     keep_intermediates: bool = False,
-    agent_runner: DigestRunner | CommentaryRunner | None = None,
+    agent_runner: Runner | None = None,
 ) -> CaseOutcome:
     """Run the full pipeline for one PDF through a registered agent route.
 
     The route's ``agent_stage`` and ``docx_stage`` select the digest family,
-    and its ``default_runner`` is used unless an explicit runner is injected.
+    and its per-provider runner table picks the agent runner unless an
+    explicit runner is injected.
     """
     return _process_pdf(
         pdf_path,
@@ -342,7 +412,7 @@ def process_pdf(  # pylint: disable=too-many-arguments  # route + injectable run
         agent_stage=pipeline.agent_stage,
         docx_stage=pipeline.docx_stage,
         keep_intermediates=keep_intermediates,
-        agent_runner=agent_runner or pipeline.default_runner,
+        agent_runner=agent_runner or pipeline.runners[credentials.provider],
     )
 
 

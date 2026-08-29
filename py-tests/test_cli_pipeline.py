@@ -23,8 +23,10 @@ from cli.pipeline import (
     process_pdf,
     resolve_pipeline,
     run_commentary_deepseek_digest,
+    run_commentary_openrouter_digest,
     run_deepseek_digest,
     run_node_script,
+    run_openrouter_digest,
     stage_agent,
     stage_commentary_agent,
     stage_commentary_docx,
@@ -34,6 +36,11 @@ from cli.pipeline import (
 from engine.agent import DIGEST_USAGE_LIMITS
 
 CREDENTIALS = Credentials(api_key="sk-test", model_slug="deepseek-v4-flash")
+OPENROUTER_CREDENTIALS = Credentials(
+    api_key="sk-or-test",
+    model_slug="deepseek/deepseek-v4-flash",
+    provider="openrouter",
+)
 
 
 def _registered_route(
@@ -50,7 +57,7 @@ def _registered_route(
         summary_unit=base.summary_unit,
         agent_stage=agent_stage,
         docx_stage=docx_stage,
-        default_runner=base.default_runner,
+        runners=base.runners,
     )
 
 
@@ -429,14 +436,20 @@ def test_pipeline_registry_maps_agent_routes_to_stages() -> None:
     assert case_route.summary_unit == "cases"
     assert case_route.agent_stage is stage_agent
     assert case_route.docx_stage is stage_docx
-    assert case_route.default_runner is run_deepseek_digest
+    assert case_route.runners == {
+        "deepseek": run_deepseek_digest,
+        "openrouter": run_openrouter_digest,
+    }
 
     commentary_route = PIPELINES["commentary-digest"]
     assert commentary_route.unit_label == "chapter(s)"
     assert commentary_route.summary_unit == "chapters"
     assert commentary_route.agent_stage is stage_commentary_agent
     assert commentary_route.docx_stage is stage_commentary_docx
-    assert commentary_route.default_runner is run_commentary_deepseek_digest
+    assert commentary_route.runners == {
+        "deepseek": run_commentary_deepseek_digest,
+        "openrouter": run_commentary_openrouter_digest,
+    }
 
 
 def test_resolve_pipeline_rejects_unknown_routes() -> None:
@@ -491,3 +504,35 @@ def test_process_pdf_defaults_to_the_route_runner(monkeypatch: pytest.MonkeyPatc
 
     process_pdf(pdf_path, tmp_path / "out", CREDENTIALS, PIPELINES["case-digest"])
     assert captured["runner"] is run_deepseek_digest
+
+    process_pdf(pdf_path, tmp_path / "out", OPENROUTER_CREDENTIALS, PIPELINES["case-digest"])
+    assert captured["runner"] is run_openrouter_digest
+
+
+def test_run_openrouter_digest_builds_an_openrouter_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeDigest:
+        def model_dump_json(self, *, indent: int) -> str:
+            return "{}"
+
+    class FakeResult:
+        digest = FakeDigest()
+
+    async def fake_run_digest(root: object, **kwargs: object) -> FakeResult:
+        captured["usage_limits"] = kwargs.get("usage_limits")
+        captured["agent_name"] = getattr(kwargs.get("agent"), "name", None)
+        captured["model_name"] = kwargs.get("model_name")
+        return FakeResult()
+
+    monkeypatch.setattr("cli.pipeline.run_case_digest", fake_run_digest)
+    asyncio.run(
+        run_openrouter_digest(
+            {"id": "n0"}, api_key="sk-or-test", model_name="deepseek/deepseek-v4-flash"
+        )
+    )
+    assert captured["usage_limits"] == DIGEST_USAGE_LIMITS
+    assert captured["agent_name"] == "case-digest-engine"
+    assert captured["model_name"] == "deepseek/deepseek-v4-flash"

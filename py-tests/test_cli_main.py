@@ -40,14 +40,28 @@ def _fake_process_pdf(  # pylint: disable=unused-argument,too-many-arguments
 class FakeStore:
     """Credential store stub that returns fixed credentials without IO."""
 
-    def resolve(self, api_key: str | None = None, model_slug: str | None = None) -> Credentials:
+    def __init__(self) -> None:
+        self.resolved: dict[str, object] = {}
+
+    def resolve(
+        self,
+        api_key: str | None = None,
+        model_slug: str | None = None,
+        provider: str | None = None,
+    ) -> Credentials:
+        self.resolved = {"provider": provider}
         return CREDENTIALS
 
 
 class FailingStore:
     """Credential store stub that always fails resolution."""
 
-    def resolve(self, api_key: str | None = None, model_slug: str | None = None) -> Credentials:
+    def resolve(
+        self,
+        api_key: str | None = None,
+        model_slug: str | None = None,
+        provider: str | None = None,
+    ) -> Credentials:
         raise CredentialError("No DeepSeek API key configured. Set DIGEST_API_KEY.")
 
 
@@ -155,6 +169,19 @@ def test_main_rejects_unknown_agent_routes(tmp_path: Path, monkeypatch: pytest.M
     with pytest.raises(SystemExit) as exc_info:
         main([str(_indir(tmp_path)), str(tmp_path / "out"), "--agent", "unknown-digest"])
     assert exc_info.value.code == 2
+
+
+def test_main_forwards_provider_to_credential_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = FakeStore()
+    monkeypatch.setattr("cli.main.CredentialStore", lambda: store)
+    monkeypatch.setattr("cli.main.process_pdf", _fake_process_pdf)
+
+    code = main([str(_indir(tmp_path)), str(tmp_path / "out"), "--provider", "openrouter"])
+
+    assert code == 0
+    assert store.resolved == {"provider": "openrouter"}
 
 
 def test_main_rejects_missing_input_directory(

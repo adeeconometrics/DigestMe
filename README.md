@@ -39,23 +39,28 @@ digest-headless <indir> <outdir> [options]
 | `indir` | Directory containing one PDF per case |
 | `outdir` | Directory for the generated `.docx` files |
 | `--agent ROUTE` | Agent pipeline for each PDF: `case-digest` (default) or `commentary-digest` |
+| `--provider PROVIDER` | Model provider: `deepseek` (default) or `openrouter` |
 | `--workers N` | Parallel service workers consuming the case queue (default: 8) |
-| `--api-key KEY` | DeepSeek API key, overrides stored config |
-| `--model SLUG` | DeepSeek model id (default: `deepseek-v4-flash`) |
+| `--api-key KEY` | Provider API key, overrides stored config |
+| `--model SLUG` | Provider model slug (default: `deepseek-v4-flash`) |
 | `--keep-intermediates` | Keep per-case markdown/tree/digest files under `<outdir>/work/` |
 
 ### Credentials
 
-Credentials resolve by precedence: explicit `--api-key` / `--model` flag, then
-the `DIGEST_API_KEY` / `DIGEST_MODEL_SLUG` environment variables, then the
-stored config file, then an interactive prompt on first run. Keys entered at a
-prompt are saved plaintext to a user config file with owner-only permissions;
-batch runs should prefer the environment variable.
+Credentials resolve by precedence: explicit `--api-key` / `--model` /
+`--provider` flag, then the `DIGEST_API_KEY` / `DIGEST_MODEL_SLUG` /
+`DIGEST_PROVIDER` environment variables, then the stored config file, then an
+interactive prompt on first run. Keys entered at a prompt are saved plaintext
+to a user config file with owner-only permissions; batch runs should prefer
+the environment variable.
 
-The engine talks to DeepSeek's own platform (`api.deepseek.com`), so the key
-must be a DeepSeek platform key (`sk-` prefixed) and the model id a bare name
-such as `deepseek-v4-flash`. Legacy `deepseek:` / `deepseek/` prefixes are
-accepted, but slugs for other providers are rejected.
+With the default `deepseek` provider the engine talks to DeepSeek's own
+platform (`api.deepseek.com`), so the key must be a DeepSeek platform key
+(`sk-` prefixed) and the model id a bare name such as `deepseek-v4-flash`.
+Legacy `deepseek:` / `deepseek/` prefixes are accepted, but slugs for other
+providers are rejected. With `--provider openrouter` the engine talks to
+OpenRouter (`openrouter.ai`), so the key must be an OpenRouter key and the
+model slug the full `provider/model` id (e.g. `deepseek/deepseek-v4-flash`).
 
 ### Output
 
@@ -76,7 +81,7 @@ digest-headless ~/cases ~/digests --workers 4
 ```
 
 ```text
-model: deepseek-v4-flash  api-key: ...abcd
+provider: deepseek  model: deepseek-v4-flash  api-key: ...abcd
 digesting 2 case(s) into ~/digests with 4 workers
 
   [1/2] ok      42.3s  /Users/me/digests/People v. State.docx
@@ -93,13 +98,22 @@ digest-headless ~/chapters ~/chapter-digests --agent commentary-digest
 ```
 
 ```text
-model: deepseek-v4-flash  api-key: ...abcd
+provider: deepseek  model: deepseek-v4-flash  api-key: ...abcd
 digesting 2 chapter(s) into ~/chapter-digests with 8 workers
 
   [1/2] ok      61.4s  /Users/me/chapter-digests/Board of Directors.docx
   [2/2] ok      57.8s  /Users/me/chapter-digests/Corporate Powers.docx
 
 2/2 chapters digested
+```
+
+To run against OpenRouter instead of the DeepSeek platform, select the
+provider and use an OpenRouter model slug:
+
+```bash
+export DIGEST_API_KEY=sk-or-...
+digest-headless ~/chapters ~/chapter-digests \
+  --agent commentary-digest --provider openrouter --model deepseek/deepseek-v4-flash
 ```
 
 ## CSV format
